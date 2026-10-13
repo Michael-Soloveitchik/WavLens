@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wavlens"
+version = "0.1.0"
+description = "Interactive waveform, spectrogram, pyannote annotation lanes and moving playhead for Jupyter"
+keywords = ["pyannote", "diarization", "audio", "jupyter", "widget", "wavesurfer"]
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Michael Soloveitchik" }]
+requires-python = ">=3.10"
+dependencies = [
+    "anywidget>=0.9",
+    "numpy",
+    "soundfile",
+    "pyannote.core>=5",
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Framework :: Jupyter",
+]
+
+[project.optional-dependencies]
+spectrogram = ["matplotlib"]        # spectrogram image (matplotlib pulls in Pillow)
+cubic = ["scipy"]                   # interpolation="cubic"
+all = ["matplotlib", "scipy"]
+dev = ["build", "twine", "playwright", "jupyter", "nbconvert", "pyannote.database", "torch"]
+
+[project.urls]
+Homepage = "https://github.com/michaelsoloveitchik/wavlens"
+
+[tool.setuptools.packages.find]
+include = ["wavlens*"]
+
+[tool.setuptools.package-data]
+wavlens = ["wavlens.js", "wavlens.iife.js"]

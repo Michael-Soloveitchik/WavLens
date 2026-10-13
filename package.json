@@ -1,0 +1,12 @@
+{
+  "name": "wavlens-js",
+  "private": true,
+  "description": "Builds wavlens/wavlens.js (anywidget ESM) with wavesurfer.js bundled in",
+  "scripts": {
+    "build": "esbuild js/wavlens.js --bundle --format=esm --minify --outfile=wavlens/wavlens.js && esbuild js/wavlens.js --bundle --format=iife --global-name=wavlens_mod --minify --outfile=wavlens/wavlens.iife.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25",
+    "wavesurfer.js": "^7"
+  }
+}

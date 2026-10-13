@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.ipynb_checkpoints/
+tests/out/
+tests/fixture.json
+node_modules
+package-lock.json
+tests/fixture_fn_rows.json
+tests/fixture_big.json
+tests/fixture_style.json
+tests/out/standalone.html
+tests/fixture_*.json

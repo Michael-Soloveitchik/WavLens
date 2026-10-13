@@ -1,0 +1,90 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>wavlens harness</title>
+  <style>
+    body { margin: 0; padding: 12px; font: 13px sans-serif; background: #fff; }
+    #widget { width: 100%; }
+    #status { color: #666; margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <div id="status">loading…</div>
+  <div id="widget"></div>
+  <!-- Tall spacer so the page is scrollable: lets the test prove Space/arrow keys do not scroll it. -->
+  <div style="height:1500px"></div>
+  <script type="module">
+    window.wavlensLog = [];
+    window.wavlensReady = false;
+    window.wavlensError = null;
+    // Observe AudioBuffers the widget creates (e.g. a masked copy on solo) and every AudioContext it opens.
+    window.wavlensBuffers = [];
+    window.wavlensContexts = [];
+    const _createBuffer = AudioContext.prototype.createBuffer;
+    AudioContext.prototype.createBuffer = function (ch, len, sr) {
+      window.wavlensBuffers.push({ channels: ch, length: len, sampleRate: sr, duration: len / sr, t: Math.round(performance.now()) });
+      return _createBuffer.call(this, ch, len, sr);
+    };
+    const _AC = window.AudioContext;
+    window.AudioContext = class extends _AC {
+      constructor(...a) { super(...a); window.wavlensContexts.push(this); }
+    };
+    const log = (...a) => { window.wavlensLog.push(a.map(String).join(" ")); };
+
+    // Minimal fake anywidget model: get / set / save_changes / on("change:<name>").
+    function makeModel(state) {
+      const callbacks = {};
+      return {
+        _state: state,
+        get(name) { return state[name]; },
+        set(name, value) {
+          state[name] = value;
+          log("set", name, JSON.stringify(value));
+          for (const cb of callbacks["change:" + name] || []) cb();
+        },
+        save_changes() { log("save_changes"); },
+        on(event, cb) { (callbacks[event] ||= []).push(cb); },
+        // anywidget models support off(event, cb) / off(event); the cleanup returned by render() uses it.
+        off(event, cb) {
+          log("off", event);
+          if (!event) { for (const k in callbacks) delete callbacks[k]; return; }
+          callbacks[event] = cb ? (callbacks[event] || []).filter((f) => f !== cb) : [];
+        },
+        _callbacks: callbacks,
+      };
+    }
+
+    try {
+      // fixture.json holds every synced trait of the real WavLens widget.
+      // ?override=<json> patches traits for variant runs (e.g. {"row_height":24,"height":60}).
+      // ?fixture=<file> picks another fixture file in this directory (default fixture.json).
+      const params = new URLSearchParams(location.search);
+      const fixture = await (await fetch("./" + (params.get("fixture") || "fixture.json"))).json();
+      const override = JSON.parse(params.get("override") || "{}");
+      const model = makeModel({ current_time: 0.0, playing: false, ...fixture, ...override });
+      window.wavlensModel = model;
+
+      const mod = await import("../wavlens/wavlens.js");
+      const render = mod.default?.render ?? mod.render;
+      if (typeof render !== "function") throw new Error("wavlens.js did not export render");
+      // ?views=2 renders a second view of the SAME model object below the first (anywidget does this per output).
+      window.wavlensCleanups = [render({ model, el: document.getElementById("widget") })];
+      for (let i = 2; i <= (parseInt(params.get("views") || "1", 10) || 1); i++) {
+        const el2 = document.createElement("div");
+        el2.id = "widget" + i;
+        document.getElementById("widget").after(el2);
+        window.wavlensCleanups.push(render({ model, el: el2 }));
+      }
+      window.wavlensCleanup = window.wavlensCleanups[0];
+      window.wavlensReady = true;
+      document.getElementById("status").textContent =
+        `rendered: duration=${fixture.duration.toFixed(2)}s groups=${fixture.groups.length}`;
+    } catch (e) {
+      window.wavlensError = String(e && e.stack || e);
+      document.getElementById("status").textContent = "ERROR: " + window.wavlensError;
+      console.error(e);
+    }
+  </script>
+</body>
+</html>
