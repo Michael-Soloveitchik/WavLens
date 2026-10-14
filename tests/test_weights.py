@@ -236,7 +236,7 @@ def t5_default():
     exp = expected([X, Y], [1.0, 1.0])
     assert_close(ch[0], exp[0], TOL, "default ch0")
     assert_close(ch[1], exp[1], TOL, "default ch1")
-    assert len(w.peaks) == 2 and all(len(p) == 2000 for p in w.peaks), [len(p) for p in w.peaks]
+    assert len(w.peaks) == 3 and all(len(p) == 2000 for p in w.peaks), [len(p) for p in w.peaks]  # 2 audios + the mix row
 
 
 # ---------------------------------------------------------------- 6. relative levels

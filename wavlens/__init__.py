@@ -616,10 +616,11 @@ class WavLens(anywidget.AnyWidget):
     _esm = Path(__file__).parent / "wavlens.js"
     audio_url = traitlets.Unicode("").tag(sync=True)
     duration = traitlets.Float(0.0).tag(sync=True)
-    groups = traitlets.List([]).tag(sync=True)          # [{"name", "rows", "segments"}, ...]
+    groups = traitlets.List([]).tag(sync=True, echo_update=False)  # [{"name", "rows", "segments"}, ...]; the browser reorders by drag
+    expanded = traitlets.List(traitlets.Unicode()).tag(sync=True, echo_update=False)  # annotation names whose legend column is open
     functions = traitlets.List([]).tag(sync=True)       # [{"name", "color", "row", "x", "y"}, ...]; row = audio index or -1
-    peaks = traitlets.List([]).tag(sync=True)           # per audio: abs-max bins, drawn without decoding
-    spectrograms = traitlets.List([]).tag(sync=True)    # per audio: JPEG data URL, stretched to the row
+    peaks = traitlets.List([]).tag(sync=True)           # per audio (+ the mix row when >= 2 audios): abs-max bins
+    spectrograms = traitlets.List([]).tag(sync=True)    # per audio (+ mix): JPEG data URL, stretched to the row
     audio_names = traitlets.List([]).tag(sync=True)
     channels = traitlets.Int(1).tag(sync=True)
     weighted = traitlets.Bool(False).tag(sync=True)     # weights baked in -> gains 1/0; else equal 1/n live
@@ -634,7 +635,6 @@ class WavLens(anywidget.AnyWidget):
     current_time = traitlets.Float(0.0).tag(sync=True, echo_update=False)
     playing = traitlets.Bool(False).tag(sync=True, echo_update=False)
     enabled = traitlets.List().tag(sync=True, echo_update=False)  # bools, cast in the validator
-    legend = traitlets.Enum(["inline", "side", "both"], "inline").tag(sync=True, echo_update=False)
     solo = traitlets.List(traitlets.Unicode()).tag(sync=True, echo_update=False)  # "g:<i>" | "l:<i>:<spk>", "!" prefix = complement; active keys intersect
     dimmed = traitlets.List(traitlets.Unicode()).tag(sync=True, echo_update=False)
 
@@ -659,6 +659,20 @@ class WavLens(anywidget.AnyWidget):
         if self.channels and len(v) != self.channels:
             raise traitlets.TraitError(f"enabled needs {self.channels} entries, got {len(v)}")
         return [bool(e) for e in v]  # numpy bools are not JSON-serializable
+
+    _mix = None  # (xs, sr, colormap, height, fscale, fmax) when there are >= 2 audios
+
+    @traitlets.observe("enabled")
+    def _mix_changed(self, _):
+        """Keep the mix row's spectrogram in step with the enabled set (the browser redraws its waveform itself)."""
+        if not self._mix:
+            return
+        xs, sr, cmap, height, fscale, fmax = self._mix
+        on = [x for x, e in zip(xs, self.enabled) if e]
+        mix = sum(on) / len(on) if on else np.zeros_like(xs[0])  # 1/m over the m selected audios
+        spec = _cache.get_or(_digest(mix, sr, cmap, height, fscale, fmax), lambda: _spectrogram(mix, sr, cmap, height, fscale, fmax))
+        if self.spectrograms and self.spectrograms[-1] != spec:
+            self.spectrograms = self.spectrograms[:len(xs)] + [spec]
 
     def seek(self, t):
         self.current_time = float(t)
@@ -730,7 +744,7 @@ wavlens_mod.default.render({{model,el:document.getElementById("wavlens")}});}})(
 # ----------------------------------------------------------------------------- show
 
 def show(*items, audio=None, annotation=None, function=None, sample_rate=None, height=96, row_height=16,
-         weights=None, interpolation="linear", colors=None, colormap="magma", view="wave", legend="inline",
+         weights=None, interpolation="linear", colors=None, colormap="magma", view="wave", expanded=(),
          step=0.01, enabled=None, solo=None, dim=(), zoom=0.0, time=0.0, autoplay=False, threshold=0.5,
          fscale="mel", fmax=None):
     """wavlens.show(audio, annotation, ...) positional in any order, or by keyword.
@@ -759,8 +773,9 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
                 Time convention everywhere: frame k of L sits at (k + 0.5) / L of the duration.
     weights:    per audio, mirroring the audio form (dict <-> dict same keys, list <-> list, one <->
                 one). Scalar, array of the audio's length, or any other length (interpolated).
-                Applied sample-exactly in Python (you see and hear w * audio). Default: equal 1/n over
-                the enabled audios, re-normalized live. Playback = sum(enabled_i * w_i * audio_i).
+                Applied sample-exactly in Python (you see and hear w * audio). Playback = sum over the m
+                selected audios of w_i * audio_i / m: selecting or muting re-normalizes by 1/m live. With
+                >= 2 audios a framed, non-selectable "mix" row shows that sum above the timeline.
     interpolation: linear | nearest | previous | cubic (clipped, no overshoot) for weights and functions
                 of other lengths. Downsampling keeps the strongest excursion per bin (sign kept) so pulses
                 and dips survive. Under the frame-centre convention nearest and previous coincide except
@@ -769,7 +784,9 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
                 list of css in Annotation.labels() order. Default: sorted union of labels -> Set1.
     colormap:   any matplotlib name. fscale: "mel" (default, low band gets most rows) | "linear".
                 fmax: top of the frequency axis in Hz (default Nyquist), e.g. 5000 for speech.
-    view:       "wave" | "fft". legend: "inline" | "side" | "both".
+    view:       "wave" | "fft". expanded: annotation names whose speaker legend column starts open
+                (True = all); the ▸ button beside each name toggles it in the browser. Drag a name up or
+                down to reorder the lane groups (the order is reflected in w.groups).
     height / row_height: px per audio row / per annotation label row. step: seconds per ◀ / ▶.
     enabled / solo ('ann', 'ann/speaker', '!ann/speaker' for the complement, or a list; several
                 intersect) / dim / zoom (px per second, 0 = fit) / time / autoplay:
@@ -812,19 +829,24 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
         buf = io.BytesIO()
         sf.write(buf, np.stack(xs, 1), sr, format="WAV", subtype="PCM_16")
         return "data:audio/wav;base64," + base64.b64encode(buf.getvalue()).decode()
-    keys = [_digest(x, sr) for x in xs]
-    audio_url = _cache.get_or(_digest(*keys, "wav"), wav)
-    peaks = [_cache.get_or(k + "peaks", lambda x=x: _peaks(x)) for k, x in zip(keys, xs)]
-    specs = [_cache.get_or(_digest(k, colormap, height, fscale, fmax), lambda x=x: _spectrogram(x, sr, colormap, height, fscale, fmax)) for k, x in zip(keys, xs)]
+    rows = xs + ([sum(xs) / len(xs)] if len(xs) >= 2 else [])  # mix row = mean of the enabled audios (all at start)
+    keys = [_digest(x, sr) for x in rows]
+    audio_url = _cache.get_or(_digest(*keys[:len(xs)], "wav"), wav)
+    peaks = [_cache.get_or(k + "peaks", lambda x=x: _peaks(x)) for k, x in zip(keys, rows)]
+    specs = [_cache.get_or(_digest(k, colormap, height, fscale, fmax), lambda x=x: _spectrogram(x, sr, colormap, height, fscale, fmax)) for k, x in zip(keys, rows)]
     w = WavLens(
         audio_url=audio_url, duration=duration, peaks=peaks, spectrograms=specs, audio_names=names,
-        channels=len(xs), weighted=weights is not None,
+        channels=len(loaded), weighted=weights is not None,
         groups=_groups([(None, a) for a in pos_ann] + _named(annotation, _is_ann), colors, form(annotation, pos_ann), duration, threshold),
         functions=_functions(_bind_functions(function, names), duration, interpolation),
-        height=height, row_height=row_height, view=view, legend=legend, step=step, zoom=float(zoom),
+        height=height, row_height=row_height, view=view, step=step, zoom=float(zoom),
         current_time=float(time), autoplay=bool(autoplay),
     )
-    w.enabled = [bool(e) for e in enabled] if enabled is not None else [True] * len(xs)
+    if len(loaded) >= 2:
+        w._mix = (xs, sr, colormap, height, fscale, fmax)
+    w.enabled = [bool(e) for e in enabled] if enabled is not None else [True] * len(loaded)
+    names_g = [g["name"] for g in w.groups]
+    w.expanded = names_g if expanded is True else [n for n in ([expanded] if isinstance(expanded, str) else expanded) if n in names_g]
     if solo is not None and solo != [] and solo != "":
         w.solo_(*(solo if isinstance(solo, list) else [solo]))
     if dim:

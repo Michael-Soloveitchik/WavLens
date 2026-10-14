@@ -98,6 +98,10 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | R4 | Spectrogram looked half blank (speech has nothing above 4 kHz on a linear axis): mel frequency axis by default, `fscale="linear"` keeps the old axis | ✅ |
 | R5 | A muted audio row is whited out like a masked gap | ✅ |
 | R6 | `fmax=` caps the spectrogram frequency axis (mel or linear), e.g. 5000 Hz for speech, so the empty top band is not drawn; image rows always equal `height` | ✅ |
+| R8 | Legend button and `legend=` removed: a `▸`/`▾` expander beside each annotation name opens that annotation's speaker column (`expanded=` argument / trait); the column collapses when none is open | ✅ |
+| R9 | Annotation groups are reorderable by dragging the name (5 px threshold, blue drop line); order persists in `groups`, mask keys remapped | ✅ |
+| R10 | Mix row: with ≥ 2 audios a framed, non-selectable row above the timeline shows the mean of the selected audios (waveform and spectrogram), live on toggles | ✅ |
+| R11 | Playback gain is 1/m over the m selected audios, explicit weights included (was 1 with weights) | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Lifecycle and sync

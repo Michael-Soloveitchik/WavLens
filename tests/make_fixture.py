@@ -49,6 +49,9 @@ def main() -> None:
     dump(wavlens.show(audio={"clean": (x, sr), "quiet": (x * 0.3, sr)}, annotation=ann,
                     function={"clean": rms, "glob": rms[::100]}),
          HERE / "fixture_fn_rows.json")
+    # Three-group variant for drag-to-reorder: a (two speakers), b (blank-label timeline), c (two speakers again).
+    dump(wavlens.show(audio={"clean": (x, sr)}, annotation={"a": ann, "b": ann.get_timeline(), "c": ann}),
+         HERE / "fixture_3groups.json")
 
 
 if __name__ == "__main__":

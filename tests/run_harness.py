@@ -72,9 +72,12 @@ JS_STATE = """
   const buttons = allButtons.map((b) => b.textContent);
   // Per-audio on/off toggles: pills in gutter column 0 (SVG checkbox + name; older builds: ☑/☐ text).
   const col0Early = document.querySelector('#widget > div > div:nth-child(3) > div');
-  const toggles = (col0Early ? [...col0Early.querySelectorAll('button')] : allButtons.filter((b) => /^[☑☐]/.test(b.textContent)))
+  const toggles = (col0Early ? [...col0Early.querySelectorAll('button')].filter((b) => b.querySelector('svg')) : allButtons.filter((b) => /^[☑☐]/.test(b.textContent)))
     .map((b) => ({ text: b.textContent.trim(), opacity: b.style.opacity, color: b.style.color, title: b.title,
                    checked: !!b.querySelector('svg path'), x: b.getBoundingClientRect().x, y: b.getBoundingClientRect().y }));
+  // Per-group ▸/▾ expanders (column 0) open that annotation's speaker labels in column 1.
+  const expanders = col0Early ? [...col0Early.querySelectorAll('button')].filter((b) => /[▸▾]/.test(b.textContent))
+    .map((b) => ({ text: b.textContent, title: b.title, x: b.getBoundingClientRect().x, y: b.getBoundingClientRect().y })) : [];
   const Dur = window.wavlensModel ? window.wavlensModel.get('duration') : 1;
   const secs = (d) => { const l = parseFloat(d.style.left) / 100 * Dur, w = parseFloat(d.style.width) / 100 * Dur; return [Math.round(l * 1000) / 1000, Math.round((l + w) * 1000) / 1000]; };
   const modeBtn = allButtons.find((b) => /^(all|none)$/.test(b.textContent));
@@ -150,6 +153,14 @@ JS_STATE = """
     current_time: window.wavlensModel && window.wavlensModel.get('current_time'),
     playing: window.wavlensModel && window.wavlensModel.get('playing'),
     legend: window.wavlensModel && window.wavlensModel.get('legend'),
+    expanded: window.wavlensModel && window.wavlensModel.get('expanded'),
+    expanders,
+    group_names: window.wavlensModel ? (window.wavlensModel.get('groups') || []).map((g) => g.name) : [],
+    col1_display: col1 ? getComputedStyle(col1).display : null,
+    col1_labels: col1Divs.filter((d) => d.dataset.key).map((d) => ({ key: d.dataset.key, text: d.textContent })),
+    name_divs: col0Divs.filter((d) => d.dataset.key).map((d) => { const r = d.getBoundingClientRect();
+      return { key: d.dataset.key, text: d.textContent, x: r.x, y: r.y, h: r.height, outline: d.style.outline, left: d.style.left }; }),
+    seg_top_by_group: segDivs.reduce((acc, d) => { const t = parseFloat(d.style.top); acc[d.dataset.group] = Math.min(acc[d.dataset.group] ?? 1e9, t); return acc; }, {}),
     solo: window.wavlensModel && window.wavlensModel.get('solo'),
     log_tail: (window.wavlensLog || []).slice(-5),
   };
@@ -385,16 +396,17 @@ def main() -> None:
             s5 = page.evaluate(JS_STATE)
             page.screenshot(path=str(OUT / "07_ticks.png"))
 
-            # 3. Legend: the button is labelled with the NEXT mode (side -> both -> inline).
-            legend_btn = page.locator("#widget button").filter(has_text=re.compile(r"^(side|both|inline)$"))
-            s6_0 = page.evaluate(JS_STATE)
-            legend_btn.click()  # "side"
-            page.wait_for_timeout(300)
-            s6a = page.evaluate(JS_STATE)
-            legend_btn.click()  # "both"
+            # 3. Expanders: ▸ of group 1 -> expanded ["speech"]; ▸ of group 0 too -> both; ▾ of group 1 -> only group 0; close all.
+            e_states = [page.evaluate(JS_STATE)]
+            for idx in (1, 0, 1, 0):
+                click_expander(page, idx)
+                page.wait_for_timeout(300)
+                e_states.append(page.evaluate(JS_STATE))
+                if len(e_states) == 3:
+                    page.screenshot(path=str(OUT / "08_expander.png"))
+            click_expander(page, 0)   # leave group 0 open so column 1 exists for later geometry/label checks on this page
             page.wait_for_timeout(300)
             s6b = page.evaluate(JS_STATE)
-            page.screenshot(path=str(OUT / "08_legend.png"))
 
             # 4. Transport: play (echoed to model), pause, then nudge back twice.
             buttons = page.locator("#widget button")
@@ -529,13 +541,12 @@ def main() -> None:
             wait_timings(page5)
             page5.wait_for_timeout(2500)
             page5.evaluate(JS_MARK_CANVASES)  # identity marks on the post-decode canvases
-            leg5 = page5.locator("#widget button").filter(has_text=re.compile(r"^(side|both|inline)$"))
             l_states = [page5.evaluate(JS_STATE)]
-            for _ in range(3):                                      # 13: side, both, inline
-                leg5.click()
+            for _ in range(2):                                      # 13: open group 0, close it: column 0 width must not change
+                click_expander(page5, 0)
                 page5.wait_for_timeout(300)
                 l_states.append(page5.evaluate(JS_STATE))
-            leg5.click()                                            # -> side, so column 1 is visible for 14/15
+            click_expander(page5, 0)                                # open group 0 so its speaker labels exist for 14/15
             page5.wait_for_timeout(300)
             geo_state = page5.evaluate(JS_STATE)
             # 14. Dim is Python-only now: set model.dimmed and check label + segment opacity, then clear.
@@ -590,6 +601,39 @@ def main() -> None:
             page6.wait_for_timeout(600)
             c2 = page6.evaluate(JS_VIEWS)
             c_dom = page6.evaluate("() => ({ widget_children: document.getElementById('widget').children.length, buttons: document.querySelectorAll('#widget button').length })")
+
+            # 18. Drag-to-reorder on a 3-group fixture: solo a/speaker90, drag "c" above "a", keys remapped; 2 px move = click.
+            page8 = browser.new_page(viewport={"width": 1100, "height": 500})
+            page8.on("console", lambda m: console.append(f"[{m.type}] (drag) {m.text}"))
+            page8.on("pageerror", lambda e: page_errors.append(f"(drag) {e}"))
+            page8.goto(f"http://127.0.0.1:{port}/tests/harness.html?fixture=fixture_3groups.json", wait_until="commit")
+            wait_timings(page8)
+            page8.wait_for_timeout(600)
+            click_expander(page8, 0)                                 # open "a"
+            page8.wait_for_timeout(300)
+            page8.locator('#widget div[data-key="l:0:speaker90"]').click()
+            page8.wait_for_timeout(300)
+            g0 = page8.evaluate(JS_STATE)
+            # Drag "c" (group 2) above "a" (group 0): pointer down on its name, move > 5 px in steps, release just below the lanes top.
+            c_name = next(n for n in g0["name_divs"] if n["text"] == "c")
+            a_name = next(n for n in g0["name_divs"] if n["text"] == "a")
+            page8.mouse.move(c_name["x"] + 5, c_name["y"] + c_name["h"] / 2)
+            page8.mouse.down()
+            page8.mouse.move(c_name["x"] + 5, a_name["y"] + 1, steps=12)
+            page8.wait_for_timeout(100)
+            g_mid = page8.evaluate("() => { const m = [...document.querySelectorAll('#widget div')].find((d) => /2px solid/.test(d.style.borderTop)); return m ? { display: m.style.display, top: m.style.top } : null; }")
+            page8.mouse.up()
+            page8.wait_for_timeout(400)
+            g1 = page8.evaluate(JS_STATE)
+            page8.screenshot(path=str(OUT / "18_drag.png"))
+            # A 2 px move must not reorder and must still cycle the mask of the clicked name.
+            a_now = next(n for n in g1["name_divs"] if n["text"] == "a")
+            page8.mouse.move(a_now["x"] + 5, a_now["y"] + a_now["h"] / 2)
+            page8.mouse.down()
+            page8.mouse.move(a_now["x"] + 5, a_now["y"] + a_now["h"] / 2 + 2, steps=2)
+            page8.mouse.up()
+            page8.wait_for_timeout(400)
+            g2 = page8.evaluate(JS_STATE)
 
             # 17. Two views of one model: play in A, B follows current_time; pause in A -> both not playing.
             page7 = browser.new_page(viewport={"width": 1100, "height": 900})
@@ -666,23 +710,7 @@ def main() -> None:
                 "notches_at_full_view": s0["timeline_notches"],
                 "labels_at_full_view": s0["timeline_labels"][:10],
             },
-            "legend": {
-                "button_initial": s6_0["legend_button"],
-                "side": {"legend": s6a["legend"], "button_now": s6a["legend_button"], "segments": s6a["lane_segments"],
-                         "segments_with_text": s6a["lane_segments_with_text"], "segments_transparent": s6a["lane_segments_transparent"],
-                         "colored_labels": s6a["colored_labels"]},
-                "both": {"legend": s6b["legend"], "button_now": s6b["legend_button"], "segments": s6b["lane_segments"],
-                         "segments_with_text": s6b["lane_segments_with_text"], "segments_transparent": s6b["lane_segments_transparent"],
-                         "colored_labels": s6b["colored_labels"]},
-                "button_sequence_ok": [s6_0["legend_button"], s6a["legend_button"], s6b["legend_button"]] == ["side", "both", "inline"],
-                "gutter_widths_inline_side_both": [s6_0["gutter_widths"], s6a["gutter_widths"], s6b["gutter_widths"]],
-                "col1_colors_side": s6a["colored_label_colors"],
-                "col1_visibility_inline_side_both": [s6_0["col1_visibility"], s6a["col1_visibility"], s6b["col1_visibility"]],
-                # Column 1 is display:none in inline mode (width 0) and sized to its widest label + 8 in side/both.
-                "gutter_widths_ok": s6_0["gutter_widths"][0] > 0 and s6_0["gutter_widths"][1] == 0
-                    and s6a["gutter_widths"][1] > 0 and s6a["gutter_widths"] == s6b["gutter_widths"]
-                    and s6_0["gutter_widths"][0] == s6a["gutter_widths"][0],
-            },
+            "expander": expander_summary(e_states, s6b),
             "transport": {
                 "playing_after_play_click": s_play["playing"],
                 "play_button_text_while_playing": s_play["play_button"],
@@ -729,7 +757,8 @@ def main() -> None:
                 "lanes_height_ok": r0["lanes_height"] == r0["lane_rows"] * 24,
                 "canvases_height": r0["canvases_height"],
                 "channel_heights": r0["channel_heights"],
-                "audio_rows_ok": r0["channel_heights"] == [60] * len(r0["channel_heights"]) and len(r0["channel_heights"]) == 2,
+                "audio_rows_note": "2 audios + 1 mix row (mean of the enabled audios) = 3 audio rows",
+                "audio_rows_ok": r0["channel_heights"] == [60] * len(r0["channel_heights"]) and len(r0["channel_heights"]) == 3,
                 "wrapper_height": r0["wrapper_height"],
             },
             "fixed_labels": {
@@ -753,11 +782,23 @@ def main() -> None:
                 "per_audio_row": [sorted(set(r)) for r in f0["fn_per_audio_row"]],
                 "per_lane_group": [sorted(set(r)) for r in f0["fn_per_lane_group"]],
                 "polylines_per_function": (len(f0["fn_per_audio_row"][0]) // max(1, len(set(f0["fn_per_audio_row"][0])))) if f0["fn_per_audio_row"] else None,
-                "ok": [sorted(set(r)) for r in f0["fn_per_audio_row"]] == [["clean", "glob"], ["glob"]]
+                # With >= 2 audios a third "mix" row (mean of the enabled audios) is drawn; row -1 functions appear on it too.
+                "audio_rows_drawn": len(f0["fn_per_audio_row"]),
+                "ok": [sorted(set(r)) for r in f0["fn_per_audio_row"]] == [["clean", "glob"], ["glob"], ["glob"]]
                       and [sorted(set(r)) for r in f0["fn_per_lane_group"]] == [["glob"]],
             },
             "transport_buttons": {"titles": s0["transport_titles"], "svg_paths": s0["transport_have_svg_path"]},
-            "legend_stability": legend_stability_summary(l_states),
+            "expander_stability": {
+                "expanded_sequence": [s["expanded"] for s in l_states],
+                "col0_widths": [s["gutter_widths"][0] for s in l_states],
+                "col1_widths": [s["gutter_widths"][1] for s in l_states],
+                "col1_display": [s["col1_display"] for s in l_states],
+                "wrapper_scroll_widths": [s["wrapper_scroll_width"] for s in l_states],
+                "canvases_same_objects_per_state": [s["marked_canvases"] == s["waveform_canvases"] and s["waveform_canvases"] > 0 for s in l_states],
+                "col0_width_unchanged": len({s["gutter_widths"][0] for s in l_states}) == 1,
+                "ok": len({s["gutter_widths"][0] for s in l_states}) == 1 and [s["col1_display"] for s in l_states] == ["none", "block", "none"],
+            },
+            "drag_reorder": drag_summary(g0, g_mid, g1, g2),
             "dim_python": {
                 "set": {"label_opacity": label_of(dim_on, "l:0:speaker90")["opacity"], "seg_opacity_speaker90": seg_opacity(dim_on, "0", "speaker90"),
                         "seg_opacity_speaker91": seg_opacity(dim_on, "0", "speaker91")},
@@ -810,8 +851,9 @@ def main() -> None:
             "page_errors": page_errors,
             "screenshots": [str(OUT / n) for n in
                             ("01_initial.png", "02_seek.png", "03_zoom.png", "04_spectrogram.png",
-                             "05_functions.png", "06_fft_zoom.png", "07_ticks.png", "08_legend.png",
-                             "09_rows.png", "10_fixed_labels.png", "11_fn_rows.png", "15_solo.png", "17_two_views.png")],
+                             "05_functions.png", "06_fft_zoom.png", "07_ticks.png", "08_expander.png",
+                             "09_rows.png", "10_fixed_labels.png", "11_fn_rows.png", "15_solo.png", "17_two_views.png",
+                             "18_drag.png")],
         }
     finally:
         srv.shutdown()
@@ -843,6 +885,53 @@ def union(intervals: list) -> list:
         else:
             out.append([s, e])
     return out
+
+
+def click_expander(page, idx: int) -> None:
+    """Click the ▸/▾ button of lane group `idx` (column 0, in group order)."""
+    page.evaluate("""(i) => { const col0 = document.querySelector('#widget > div > div:nth-child(3) > div');
+      const b = [...col0.querySelectorAll('button')].filter((b) => /[▸▾]/.test(b.textContent))[i]; b.click(); }""", idx)
+
+
+def expander_summary(states: list, final: dict) -> dict:
+    steps = ["start", "open_1", "open_0_too", "close_1", "close_0"]
+    out = {}
+    for name, s in zip(steps, states):
+        out[name] = {"expanded": s["expanded"], "expander_texts": [e["text"] for e in s["expanders"]],
+                     "col1_display": s["col1_display"], "col1_labels": [l["key"] for l in s["col1_labels"]],
+                     "col0_width": s["gutter_widths"][0], "col1_width": s["gutter_widths"][1],
+                     "segments_with_text": s["lane_segments_with_text"]}
+    exp = [s["expanded"] for s in states]
+    labels = [[l["key"] for l in s["col1_labels"]] for s in states]
+    ok = (exp == [[], ["speech"], ["speech", "reference"], ["reference"], []]
+          and labels[1] == [] and sorted(labels[2]) == ["l:0:speaker90", "l:0:speaker91"] and sorted(labels[3]) == ["l:0:speaker90", "l:0:speaker91"]
+          and states[4]["col1_display"] == "none" and states[2]["col1_display"] != "none"
+          and len({s["gutter_widths"][0] for s in states}) == 1
+          and all(s["lane_segments_with_text"] == states[0]["lane_segments_with_text"] for s in states))
+    out["note"] = "group 1 ('speech') has a blank-label row, so opening it alone adds no column-1 label and column 1 stays display:none"
+    out["final_open_0"] = {"expanded": final["expanded"], "col1_labels": [l["key"] for l in final["col1_labels"]]}
+    out["ok"] = ok
+    return out
+
+
+def drag_summary(g0: dict, mid: dict | None, g1: dict, g2: dict) -> dict:
+    return {
+        "before": {"group_names": g0["group_names"], "solo": g0["solo"], "seg_top_by_group": g0["seg_top_by_group"],
+                   "outlined": [n["key"] for n in g0["name_labels"] if n["outline"]]},
+        "marker_while_dragging": mid,
+        "after_drag_c_above_a": {"group_names": g1["group_names"], "solo": g1["solo"], "expanded": g1["expanded"],
+                                 "seg_top_by_group": g1["seg_top_by_group"],
+                                 "outlined": [n["key"] for n in g1["name_labels"] if n["outline"]],
+                                 "col1_labels": [l["key"] for l in g1["col1_labels"]]},
+        "after_2px_move_on_a": {"group_names": g2["group_names"], "solo": g2["solo"],
+                                "outlined": [n["key"] for n in g2["name_labels"] if n["outline"]]},
+        "ok": g0["group_names"] == ["a", "b", "c"] and g0["solo"] == ["l:0:speaker90"]
+              and g1["group_names"] == ["c", "a", "b"] and g1["solo"] == ["l:1:speaker90"]
+              and "l:1:speaker90" in [n["key"] for n in g1["name_labels"] if n["outline"]]
+              and g1["seg_top_by_group"].get("0", 1e9) < g1["seg_top_by_group"].get("1", 1e9) < g1["seg_top_by_group"].get("2", 1e9)
+              and mid is not None and mid["display"] != "none"
+              and g2["group_names"] == ["c", "a", "b"] and sorted(g2["solo"]) == sorted(["l:1:speaker90", "g:1"]),
+    }
 
 
 def legend_stability_summary(states: list) -> dict:

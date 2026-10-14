@@ -67,11 +67,11 @@ function union(segs) {
 
 function render({ model, el: host }) {
   const H = model.get("height"), N = model.get("channels") || 1, D = model.get("duration"), RH = model.get("row_height") || 16;
+  const R = N + (N >= 2 ? 1 : 0);  // audio rows drawn: the inputs plus, with >= 2 audios, the mix row (mean of the enabled ones)
   const subs = [], on = (ev, cb) => { model.on(ev, cb); subs.push([ev, cb]); };  // removed on destroy
   const viewId = Symbol("view");  // several views of one model: only the one that started playback makes sound
   const step = model.get("step") || 0.01;
-  const NEXT = { inline: "side", side: "both", both: "inline" };
-  let legend = model.get("legend") || "inline";
+  const expanded = new Set(model.get("expanded") || []);  // annotation names with an open legend column
   let enabled = (model.get("enabled") || []).slice(0, N);
   while (enabled.length < N) enabled.push(true);
 
@@ -89,11 +89,10 @@ function render({ model, el: host }) {
   const back = round(ICON.back, 34, "#1e88e5", `-${step * 1000} ms`), play = round(ICON.play, 48, "#43a047", "play / pause"), fwd = round(ICON.fwd, 34, "#1e88e5", `+${step * 1000} ms`);
   const allBtn = pill("none", "background:#333;color:#fff;border-color:#333;font-weight:600;min-width:44px;letter-spacing:.3px;");
   const fft = pill("FFT", "min-width:44px;font-size:9px;font-weight:700;letter-spacing:1.2px;padding:1px 8px;border-color:#888;color:#222;");
-  const leg = pill(NEXT[legend], "min-width:44px;");
   const left2 = el("div", "position:absolute;left:4px;top:4px;");
   left2.appendChild(allBtn);
   bar1.append(timeOut, back, play, fwd);
-  bar2.append(left2, fft, leg);
+  bar2.append(left2, fft);
   const wave = el("div", "position:relative;width:100%;display:flex;align-items:flex-start;");
   const col0 = el("div", "position:relative;flex:none;"), col1 = el("div", "position:relative;flex:none;");
   const wsHost = el("div", "position:relative;flex:1;min-width:0;");
@@ -103,7 +102,7 @@ function render({ model, el: host }) {
 
   const ws = WaveSurfer.create({
     container: wsHost, url: model.get("audio_url"), peaks: model.get("peaks"), duration: D, backend: "WebAudio",
-    height: H, splitChannels: N > 1 ? Array.from({ length: N }, () => ({ height: H })) : undefined,
+    height: H, splitChannels: R > 1 ? Array.from({ length: R }, () => ({ height: H })) : undefined,
     waveColor: "#9e9e9e", progressColor: "#9e9e9e", cursorColor: "#e00", cursorWidth: 2,
     autoScroll: true, autoCenter: true,
     plugins: [],
@@ -112,8 +111,8 @@ function render({ model, el: host }) {
   ws.on("scroll", () => (zoomPlugin.oldX = 0));   // upstream caches the pointer time while the mouse is still;
   ws.on("seeking", () => (zoomPlugin.oldX = 0));  // invalidate it whenever the view or position moved
   const wrapper = ws.getWrapper();
-  const spec = el("div", `display:none;position:relative;height:${H * N}px;`);
-  const overlay = el("div", `position:absolute;left:0;top:0;width:100%;height:${N * H}px;z-index:4;pointer-events:none;`); // functions + white-out
+  const spec = el("div", `display:none;position:relative;height:${H * R}px;`);
+  const overlay = el("div", `position:absolute;left:0;top:0;width:100%;height:${R * H}px;z-index:4;pointer-events:none;`); // functions + white-out
   const timeHost = el("div", `position:relative;height:${TIMELINE_H}px;`);
   const lanes = el("div", "position:relative;width:100%;font-family:sans-serif;user-select:none;");
   wrapper.append(spec, overlay, timeHost, lanes);
@@ -131,7 +130,7 @@ function render({ model, el: host }) {
   const toggles = [];
   const applyEnabled = () => {
     allBtn.textContent = enabled.every(Boolean) ? "none" : "all";
-    const g1 = model.get("weighted") ? 1 : 1 / Math.max(1, enabled.filter(Boolean).length);
+    const g1 = 1 / Math.max(1, enabled.filter(Boolean).length);  // 1/m over the m selected audios, weights or not
     enabled.forEach((on, i) => {
       gains[i].gain.setTargetAtTime(on ? g1 : 0, ctx.currentTime, 0.01);
       const t = toggles[i];
@@ -148,13 +147,28 @@ function render({ model, el: host }) {
       t.title = on ? "playing, click to mute" : "muted, click to play";
     });
   };
-  const setEnabled = (arr) => { enabled = arr; model.set("enabled", arr.slice()); model.save_changes(); applyEnabled(); };
+  const setEnabled = (arr) => { enabled = arr; model.set("enabled", arr.slice()); model.save_changes(); applyEnabled(); renderMix(); };
   allBtn.onclick = () => { const on = !enabled.every(Boolean); setEnabled(enabled.map(() => on)); };
   on("change:weighted", applyEnabled);
-  on("change:enabled", () => { enabled = (model.get("enabled") || []).slice(0, N); while (enabled.length < N) enabled.push(true); applyEnabled(); });
+  on("change:enabled", () => { enabled = (model.get("enabled") || []).slice(0, N); while (enabled.length < N) enabled.push(true); applyEnabled(); renderMix(); });
+  on("change:spectrograms", () => draw());
 
   // ---- solo: silence outside the kept segments (masked buffer) and skip the gaps while playing
   let orig = null;
+  // Rendering buffer = the inputs plus the mix row (mean of the enabled ones); playback keeps the N-channel buffer.
+  const withMix = (buf) => {
+    if (R === N) return buf;
+    const out = ctx.createBuffer(R, buf.length, buf.sampleRate), mix = out.getChannelData(N);
+    const g1 = 1 / Math.max(1, enabled.filter(Boolean).length);
+    for (let c = 0; c < N; c++) {
+      const src = buf.getChannelData(c);
+      out.copyToChannel(src, c);
+      if (enabled[c]) for (let i = 0; i < src.length; i++) mix[i] += src[i] * g1;
+    }
+    return out;
+  };
+  let mixTimer;
+  const renderMix = () => { if (!orig || R === N) return; clearTimeout(mixTimer); mixTimer = setTimeout(() => { ws.decodedData = withMix(orig); ws.renderer.render(ws.decodedData); }, 30); };
   const segsOf = (key) => {
     const [kind, gi, lab] = key.split(":"), g = (model.get("groups") || [])[+gi] || { segments: [] };
     return union(g.segments.filter((s) => kind === "g" || s.label === lab).map((s) => [s.start, s.end]));
@@ -205,7 +219,7 @@ function render({ model, el: host }) {
   };
   let pendingPlay = false;
   player.addEventListener("canplay", () => {
-    if (player.buffer && !orig) { orig = player.buffer; ws.decodedData = orig; ws.renderer.render(orig); }
+    if (player.buffer && !orig) { orig = player.buffer; ws.decodedData = withMix(orig); ws.renderer.render(ws.decodedData); }
     if (pendingPlay) { pendingPlay = false; ws.play(); }
   });
   const safePlay = () => { model._wavlensActive = viewId; ctx.resume?.(); if (orig) ws.play(); else pendingPlay = true; };
@@ -222,6 +236,7 @@ function render({ model, el: host }) {
     d.style.cursor = "pointer";
     d.title = "click: keep its segments / keep the rest / all";
     d.onclick = () => {
+      if (d.dataset.dragged) { delete d.dataset.dragged; return; }
       const mode = solos.get(key);
       if (!mode) solos.set(key, "keep"); else if (mode === "keep") solos.set(key, "inv"); else solos.delete(key);
       model.set("solo", soloState()); model.save_changes(); applySolo();
@@ -260,11 +275,16 @@ function render({ model, el: host }) {
     (model.get("spectrograms") || []).forEach((src, i) => {
       if (src) spec.appendChild(Object.assign(el("img", `position:absolute;left:0;top:${i * H}px;width:100%;height:${H}px;`), { src }));
     });
-    for (let i = 0; i < N; i++) {
-      const t = pill("", `position:absolute;left:4px;top:${i * H + 3}px;padding:0 7px 0 6px;border-radius:9px;line-height:16px;`);
-      t.onclick = () => setEnabled(enabled.map((on, k) => (k === i ? !on : on)));
-      toggles.push(t);
-      col0.appendChild(t);
+    for (let i = 0; i < R; i++) {
+      if (i < N) {
+        const t = pill("", `position:absolute;left:4px;top:${i * H + 3}px;padding:0 7px 0 6px;border-radius:9px;line-height:16px;`);
+        t.onclick = () => setEnabled(enabled.map((on, k) => (k === i ? !on : on)));
+        toggles.push(t);
+        col0.appendChild(t);
+      } else {  // mix row: not selectable, framed in blue
+        col0.appendChild(el("div", `position:absolute;left:4px;top:${i * H + 3}px;font:600 10px sans-serif;color:#1e88e5;padding:1px 7px;border:1px solid #1e88e5;border-radius:9px;line-height:14px;`, "mix"));
+        overlay.appendChild(el("div", `position:absolute;left:0;width:100%;top:${i * H}px;height:${H}px;box-sizing:border-box;border-top:1.5px solid #1e88e5;border-bottom:1.5px solid #1e88e5;background:rgba(30,136,229,.04);`));
+      }
       const own = fns.filter((f) => f.row === i || f.row === -1 || f.row == null);
       if (own.length) overlay.appendChild(lines(own, i * H, H));
     }
@@ -282,7 +302,7 @@ function render({ model, el: host }) {
         const h = Math.max(RH - 2, 2);
         const d = el("div",
           `position:absolute;top:${top + g.rows.indexOf(s.label) * RH + 1}px;height:${h}px;left:${pct(s.start)};width:${pct(s.end - s.start)};` +
-          `background:${s.color};color:${legend === "side" ? "transparent" : "#fff"};border-radius:2px;overflow:hidden;white-space:nowrap;text-indent:3px;box-sizing:border-box;line-height:${h}px;font-size:${Math.min(11, RH - 4)}px;`,
+          `background:${s.color};color:#fff;border-radius:2px;overflow:hidden;white-space:nowrap;text-indent:3px;box-sizing:border-box;line-height:${h}px;font-size:${Math.min(11, RH - 4)}px;`,
           s.label);
         d.title = `${s.label} ${s.start.toFixed(2)}–${s.end.toFixed(2)}s`;
         d.dataset.group = gi;
@@ -291,20 +311,76 @@ function render({ model, el: host }) {
         lanes.appendChild(d);
       }
       const y = (i) => laneTop + top + i * RH + Math.max(0, (RH - 12) / 2);
-      if (g.name) clickable(col0.appendChild(text(g.name, y(0), "#555")), `g:${gi}`);
-      g.rows.forEach((r, i) => { if (r) clickable(col1.appendChild(text(r, y(i), color[r])), `l:${gi}:${r}`); });
+      const open = expanded.has(g.name);
+      const tog = el("button", `position:absolute;left:2px;top:${y(0) - 1}px;width:13px;height:13px;padding:0;border:0;background:none;color:#777;cursor:pointer;font:11px/13px sans-serif;`, open ? "▾" : "▸");
+      tog.title = open ? "hide this annotation's speakers" : "show this annotation's speakers";
+      tog.onclick = () => { open ? expanded.delete(g.name) : expanded.add(g.name); model.set("expanded", [...expanded]); model.save_changes(); draw(); };
+      col0.appendChild(tog);
+      const nameEl = text(g.name, y(0), "#555");
+      nameEl.style.left = "16px";
+      clickable(nameEl, `g:${gi}`);
+      draggable(nameEl, gi);
+      col0.appendChild(nameEl);
+      if (open) g.rows.forEach((r, i) => { if (r) clickable(col1.appendChild(text(r, y(i), color[r])), `l:${gi}:${r}`); });
       top += g.rows.length * RH;
     });
-    // columns: as wide as their widest entry (column 0 also fits the all/none button); column 1 collapses in inline
+    // columns: as wide as their widest entry (column 0 also fits the all/none button); column 1 collapses when nothing is expanded
     const h = laneTop + top;
     col0.style.height = col1.style.height = `${h}px`;
-    col0.style.width = `${Math.max(widest(col0), allBtn.offsetWidth) + 8}px`;
+    col0.style.width = `${Math.max(...[...col0.children].map((c) => c.offsetLeft + c.offsetWidth), allBtn.offsetWidth) + 8}px`;
     col1.style.width = `${widest(col1) + 8}px`;
-    col1.style.display = legend === "inline" ? "none" : "";
+    col1.style.display = col1.children.length ? "" : "none";
     applySolo();
     applyDim();
   };
-  const applyLegend = () => { leg.textContent = NEXT[legend]; draw(); };
+  // Drag an annotation name up/down to reorder the lane groups; a click (< 5 px) is left to the mask cycle.
+  const marker = el("div", "position:absolute;left:0;right:0;height:0;border-top:2px solid #1e88e5;display:none;z-index:9;pointer-events:none;");
+  wave.appendChild(marker);
+  const draggable = (d, gi) => {
+    d.style.touchAction = "none";
+    d.onpointerdown = (e0) => {
+      const groups = model.get("groups") || [];
+      let y0 = e0.clientY, moved = false, target = gi;
+      const bounds = () => {  // y of each group boundary (top of group k), in wave coordinates
+        const laneTop = lanes.offsetTop, out = [laneTop];
+        for (const g of groups) out.push(out[out.length - 1] + g.rows.length * RH);
+        return out;
+      };
+      const move = (e) => {
+        if (!moved && Math.abs(e.clientY - y0) < 5) return;
+        moved = true;
+        d.style.opacity = ".4";
+        const b = bounds(), y = e.clientY - wave.getBoundingClientRect().top;
+        target = 0;
+        for (let k = 0; k < groups.length; k++) if (y > (b[k] + b[k + 1]) / 2) target = k + 1;
+        marker.style.top = `${b[Math.min(target, groups.length)]}px`;
+        marker.style.display = "";
+      };
+      const up = () => {
+        document.removeEventListener("pointermove", move);
+        document.removeEventListener("pointerup", up);
+        marker.style.display = "none";
+        d.style.opacity = "";
+        if (!moved) return;
+        d.dataset.dragged = "1";  // swallow the click that follows a drag
+        const dest = target > gi ? target - 1 : target;
+        if (dest === gi) return;
+        const order = groups.map((_, k) => k);
+        order.splice(dest, 0, order.splice(gi, 1)[0]);
+        const remap = (key) => { const [kind, i, ...rest] = key.split(":"); return [kind, order.indexOf(+i), ...rest].join(":"); };
+        for (const [k, m] of [...solos]) { solos.delete(k); solos.set(remap(k), m); }
+        for (const k of [...dimmed]) { dimmed.delete(k); dimmed.add(remap(k)); }
+        model.set("groups", order.map((k) => groups[k]));
+        model.set("solo", soloState());
+        model.set("dimmed", [...dimmed]);
+        model.save_changes();
+        draw();
+        applySolo();
+      };
+      document.addEventListener("pointermove", move);
+      document.addEventListener("pointerup", up);
+    };
+  };
   draw();
   ws.on("ready", draw);
   ["groups", "functions", "audio_names"].forEach((k) => on(`change:${k}`, () => {
@@ -322,7 +398,7 @@ function render({ model, el: host }) {
   const ro = new ResizeObserver(() => { if (seenWidth === 0 && root.clientWidth > 0) draw(); seenWidth = root.clientWidth; });
   ro.observe(root);
   if (!(model.get("spectrograms") || []).some(Boolean)) { fft.disabled = true; fft.title = "no spectrogram (matplotlib missing)"; fft.style.opacity = ".4"; }
-  on("change:legend", () => { legend = model.get("legend"); applyLegend(); });
+  on("change:expanded", () => { expanded.clear(); for (const n of model.get("expanded") || []) expanded.add(n); draw(); });
   on("change:solo", () => { solos.clear(); for (const k of model.get("solo") || []) solos.set(k.startsWith("!") ? k.slice(1) : k, k.startsWith("!") ? "inv" : "keep"); applySolo(); });
   on("change:dimmed", () => { dimmed.clear(); for (const k of model.get("dimmed") || []) dimmed.add(k); applyDim(); });
 
@@ -334,7 +410,6 @@ function render({ model, el: host }) {
     spec.style.display = showSpec ? "" : "none";
   };
   fft.onclick = () => { showSpec = !showSpec; applyView(); };
-  leg.onclick = () => { legend = NEXT[legend] || "inline"; model.set("legend", legend); model.save_changes(); applyLegend(); };
   const nudge = (d) => ws.setTime(Math.min(D, Math.max(0, ws.getCurrentTime() + d)));
   const playPause = () => (ws.isPlaying() ? ws.pause() : safePlay());
   back.onclick = () => nudge(-step);

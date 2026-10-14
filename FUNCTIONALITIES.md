@@ -73,7 +73,7 @@ Forms: 1-D array/tensor; frame matrix `(T,K)` / `(1,T,K)` or `.logits` (one curv
 
 ## 5. Weights (`weights=`)
 
-Mirror the `audio` form: dict ↔ dict with the same keys, list ↔ list of the same length, one ↔ one. Each entry: scalar (whole audio), array of the audio's length (elementwise), or any other 1-D length (interpolated to the audio with `interpolation`). Applied sample-exactly in Python before peak normalization: you see and hear `w · audio`. With weights, the ☑ toggles only mute (gain 1/0). Without weights, playback mixes the enabled audios at `1/n_enabled`, re-normalized live when toggling. Negative weights invert, NaN/None/bool raise, 2-D raise.
+Mirror the `audio` form: dict ↔ dict with the same keys, list ↔ list of the same length, one ↔ one. Each entry: scalar (whole audio), array of the audio's length (elementwise), or any other 1-D length (interpolated to the audio with `interpolation`). Applied sample-exactly in Python before peak normalization: you see and hear `w · audio`. Playback = Σ over the m selected audios of `w_i · audio_i / m`: selecting or muting re-normalizes by 1/m live, with or without explicit weights. Negative weights invert, NaN/None/bool raise, 2-D raise.
 
 ## 6. Interpolation
 
@@ -91,12 +91,12 @@ Mirror the `audio` form: dict ↔ dict with the same keys, list ↔ list of the 
 
 Rows top to bottom:
 1. Panel row 1: time readout (seconds, 3 decimals) | `◀` (−step) | play/pause (green circle) | `▶` (+step). Tooltips show the step.
-2. Panel row 2: `none`/`all` (left, dark pill, toggles every audio; label = next action) | `FFT`/`WAVE` (small caps pill) | legend mode button (label = next mode: `side` → `both` → `inline`).
-3. Gutter column 0: per-audio checkbox + name at each audio row (green check = playing, empty box = muted), annotation names at each lane group (click = mask cycle). Width = widest entry or the all/none button (dark filled pill).
-4. Gutter column 1 (only in `side` / `both`): one coloured speaker label per lane row (click = mask cycle). Width = widest label. Light colours get a dark halo.
-5. Audio rows, `height` px each: waveform (first paint from 2000 peaks, exact samples after background decode) or spectrogram image (`fft`). Function lines overlay (SVG, 1 px).
+2. Panel row 2: `none`/`all` (left, dark pill, toggles every audio; label = next action) | `FFT`/`WAVE` (small caps pill).
+3. Gutter column 0: per-audio checkbox + name at each audio row (green check = playing, empty box = muted); at each lane group a `▸` / `▾` expander and the annotation name (click = mask cycle; press-hold-drag beyond 5 px = move the group up or down, a blue line shows the drop position, the new order is written to `groups`, mask keys follow). Width = widest entry or the all/none button (dark filled pill).
+4. Gutter column 1: one coloured speaker label per lane row, only for the annotations whose expander is open (`expanded` trait / argument); collapses when none is open (click = mask cycle). Width = widest label. Light colours get a dark halo.
+5. Audio rows, `height` px each: waveform (first paint from 2000 peaks, exact samples after background decode) or spectrogram image (`fft`). Function lines overlay (SVG, 1 px). With two or more audios a last **mix row** (blue frame, label `mix`, no checkbox) shows the mean of the selected audios, i.e. what is played; it re-renders when you toggle audios (waveform in the browser, spectrogram recomputed by Python when `enabled` changes).
 6. Timeline, 16 px: ticks ≥ 6 px apart, secondary labels ≥ 40 px, primary ≥ 90 px, decimals for sub-second steps; recomputed on every zoom.
-7. Lane groups, `row_height` px per label row; segments coloured, label text inside (`inline` / `both`), transparent in `side`.
+7. Lane groups, `row_height` px per label row, in the order of `groups` (draggable); segments coloured with the label text inside.
 
 Everything inside the scroll wrapper is sized in percent of the duration: zoom is CSS stretching, no recompute. The red playhead spans all rows.
 
@@ -110,13 +110,13 @@ Interactions:
 
 ## 10. Python ↔ browser
 
-Traits (synced): `audio_url, duration, groups, functions, peaks, spectrograms, audio_names, channels, weighted, height, row_height, view, step, zoom, autoplay` (Python → browser) and `current_time, playing, enabled, legend, solo, dimmed` (both ways, `echo_update=False` so a slow link never replays stale values).
+Traits (synced): `audio_url, duration, functions, peaks, spectrograms, audio_names, channels, weighted, height, row_height, view, step, zoom, autoplay` (Python → browser) and `groups` (order changes by drag), `expanded, current_time, playing, enabled, solo, dimmed` (both ways, `echo_update=False` so a slow link never replays stale values).
 
-Methods: `w.seek(t)`, `w.play()`, `w.pause()`, `w.solo_(*items)` (`"ref"`, `"ref/speaker90"`, `("ref", "speaker90")`; no args clears), `w.dim(*items)` (same keys; no args clears), `w.enabled = [...]`, `w.legend = "side"`.
+Methods: `w.seek(t)`, `w.play()`, `w.pause()`, `w.solo_(*items)` (`"ref"`, `"ref/speaker90"`, `("ref", "speaker90")`; no args clears), `w.dim(*items)` (same keys; no args clears), `w.enabled = [...]`, `w.expanded = ["ref"]`, `w.groups` (current order).
 
 Arguments for initial state: `enabled=[bools]`, `solo="ref"` or list, `dim=[...]`, `zoom=px_per_second` (0 = fit), `time=seconds`, `autoplay=True` (browsers may block until a click), `view="fft"`, `legend="side"|"both"`, `step=seconds`.
 
-Validation: `view`, `legend` are enums; `height`, `row_height` > 0; `step` > 0; `zoom`, `time` finite ≥ 0; `enabled` length = number of audios; unknown annotation or speaker in `solo` / `dim` raises.
+Validation: `view` is an enum; `height`, `row_height` > 0; `step` > 0; `zoom`, `time` finite ≥ 0; `enabled` length = number of audios; unknown annotation or speaker in `solo` / `dim` raises.
 
 ## 10b. Standalone export, Comet, Weights & Biases
 
