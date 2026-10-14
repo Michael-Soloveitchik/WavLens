@@ -3,7 +3,7 @@ import WaveSurfer from "wavesurfer.js";
 import Timeline from "wavesurfer.js/dist/plugins/timeline.esm.js";
 import Zoom from "wavesurfer.js/dist/plugins/zoom.esm.js";
 
-// Layout: two button rows, then a flex row of three columns: column 0 (☑ per audio,
+// Layout: two button rows, then a flex row of three columns: column 0 (checkbox per audio,
 // annotation names; as wide as its longest entry or the all/none button), column 1
 // (per-row speaker legend; shown in side/both, collapsed in inline) and wavesurfer's
 // scroll wrapper with the audio rows (waveform | spectrogram tiles), the timeline
@@ -139,15 +139,14 @@ function render({ model, el: host }) {
       gains[i].gain.setTargetAtTime(on ? g1 : 0, ctx.currentTime, 0.01);
       const t = toggles[i];
       if (!t) return;
-      t.innerHTML = (on
-        ? `<svg width="11" height="11" viewBox="0 0 12 12" style="vertical-align:-1px;margin-right:5px"><rect width="12" height="12" rx="2.5" fill="#43a047"/><path d="M2.5 6.2l2.4 2.4 4.6-4.8" fill="none" stroke="#fff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>`
-        : `<svg width="11" height="11" viewBox="0 0 12 12" style="vertical-align:-1px;margin-right:5px"><rect x=".75" y=".75" width="10.5" height="10.5" rx="2.5" fill="#fff" stroke="#9e9e9e" stroke-width="1.5"/></svg>`) +
+      t.innerHTML = `<svg width="9" height="9" viewBox="0 0 12 12" style="vertical-align:-0.5px;margin-right:5px"><rect x=".75" y=".75" width="10.5" height="10.5" rx="2" fill="#fff" stroke="${on ? "#43a047" : "#bbb"}" stroke-width="1.2"/>` +
+        (on ? `<path d="M3 6.3l2.2 2.2 4-4.4" fill="none" stroke="#43a047" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>` : "") + `</svg>` +
         (model.get("audio_names")?.[i] || "");
       const m = overlay.querySelector(`.mute[data-row="${i}"]`);  // muted rows look like masked gaps
       if (!on && !m) { const d = el("div", `position:absolute;left:0;width:100%;top:${order.indexOf(i) * H}px;height:${H}px;background:rgba(255,255,255,.85);`); d.className = "mute"; d.dataset.row = i; overlay.appendChild(d); }
       if (on && m) m.remove();
-      t.style.color = on ? "#222" : "#999";
-      t.style.borderColor = on ? "#9ccc9e" : "#ddd";
+      t.style.color = on ? "#333" : "#999";
+      t.style.borderColor = on ? "#ccc" : "#e3e3e3";
       t.title = on ? "playing, click to mute" : "muted, click to play";
     });
   };
@@ -296,7 +295,7 @@ function render({ model, el: host }) {
     for (let r = 0; r < rows; r++) {
       const i = r < N ? order[r] : -2;  // original audio index shown in this row (-2 = mix)
       if (r < N) {
-        const t = pill("", `position:absolute;left:4px;top:${r * H + 3}px;padding:0 7px 0 6px;border-radius:9px;line-height:16px;`);
+        const t = pill("", `position:absolute;left:4px;top:${r * H + 3}px;padding:0 6px 0 5px;border-radius:8px;line-height:15px;font-size:10px;`);
         t.onclick = () => { if (t.dataset.dragged) { delete t.dataset.dragged; return; } setEnabled(enabled.map((on, k) => (k === i ? !on : on))); };
         dragRows(t, r, () => Array.from({ length: N + 1 }, (_, k) => k * H), (from, dest) => {
           order.splice(dest, 0, order.splice(from, 1)[0]);
@@ -328,7 +327,7 @@ function render({ model, el: host }) {
         const h = Math.max(RH - 2, 2);
         const d = el("div",
           `position:absolute;top:${top + g.rows.indexOf(s.label) * RH + 1}px;height:${h}px;left:${pct(s.start)};width:${pct(s.end - s.start)};` +
-          `background:${s.color};border-radius:2px;box-sizing:border-box;`);  // no text on the segment: names live in the ▸ column
+          `background:${s.color};border-radius:2px;box-sizing:border-box;`);  // no text on the segment: names live in the expander column
         d.title = `${s.label} ${s.start.toFixed(2)}–${s.end.toFixed(2)}s`;
         d.dataset.group = gi;
         d.dataset.label = s.label;
@@ -337,7 +336,10 @@ function render({ model, el: host }) {
       }
       const y = (i) => laneTop + top + i * RH + Math.max(0, (RH - 12) / 2);
       const open = expanded.has(g.name);
-      const tog = el("button", `position:absolute;left:2px;top:${y(0) - 1}px;width:13px;height:13px;padding:0;border:0;background:none;color:#777;cursor:pointer;font:11px/13px sans-serif;`, open ? "▾" : "▸");
+      const tog = el("button", `position:absolute;left:2px;top:${y(0) - 1}px;width:13px;height:13px;padding:0;border:0;background:none;color:#888;cursor:pointer;display:flex;align-items:center;justify-content:center;`);
+      tog.className = "exp";
+      tog.innerHTML = `<svg width="8" height="8" viewBox="0 0 8 8" style="transform:rotate(${open ? 90 : 0}deg);transition:transform .12s"><path d="M2 1l4 3-4 3z" fill="currentColor"/></svg>`;
+      tog.setAttribute("aria-label", open ? "collapse" : "expand");
       tog.title = open ? "hide this annotation's speakers" : "show this annotation's speakers";
       tog.onclick = () => {
         open ? expanded.delete(g.name) : expanded.add(g.name);

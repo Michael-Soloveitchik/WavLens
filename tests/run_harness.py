@@ -267,6 +267,23 @@ JS_VIEWS = """
 }
 """
 
+# In-page: clear the AudioParam log, press play, sample the readout for `total` ms, pause; return samples + scheduling calls.
+JS_GAP_JUMP = """
+async (total) => {
+  const ro = %s, play = document.querySelectorAll('#widget button')[1];
+  window.wavlensParamCalls = [];
+  const t0 = performance.now(), out = [];
+  play.click();
+  while (performance.now() - t0 < total) {
+    out.push([Math.round(performance.now() - t0), parseFloat(ro.textContent)]);
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  play.click();
+  return { samples: out, calls: window.wavlensParamCalls.map((c) => ({ m: c.m, args: c.args, t: c.t - Math.round(t0) })),
+           playing_after: window.wavlensModel.get('playing') };
+}
+""" % JS_READOUT
+
 # In-page latency: ms from the action to the first readout text change (-1 if none within 2 s).
 JS_LATENCY = """
 (action) => new Promise((res) => {
@@ -573,6 +590,22 @@ def main() -> None:
             W = 300
             m = {}
             spk.click(); page5.wait_for_timeout(W); m["spk90_keep"] = page5.evaluate(JS_STATE)
+            # Click = seek only: paused stays paused; while playing, a click seeks and playback continues.
+            cs_paused = page5.evaluate(JS_SEEK_CLICK, 9.0)
+            page5.wait_for_timeout(300)
+            cs_paused_state = page5.evaluate(JS_STATE)
+            # Gap jump with speaker90 soloed: seek to 7.0 s, play 1.5 s; the 7.12 -> 8.32 jump must re-arm the mask gain (setValueAtTime(1, ...)).
+            page5.evaluate("window.wavlensModel.set('current_time', 7.0)")
+            page5.wait_for_timeout(200)
+            gap_jump = page5.evaluate(JS_GAP_JUMP, 1500)
+            page5.wait_for_timeout(200)
+            page5.locator("#widget button").nth(1).click()           # play again, then click-seek while playing
+            page5.wait_for_timeout(300)
+            cs_playing = page5.evaluate(JS_SEEK_CLICK, 12.0)
+            page5.wait_for_timeout(300)
+            cs_playing_state = page5.evaluate(JS_STATE)
+            page5.locator("#widget button").nth(1).click()           # pause
+            page5.wait_for_timeout(200)
             spk.click(); page5.wait_for_timeout(W); m["spk90_complement"] = page5.evaluate(JS_STATE)
             spk.click(); page5.wait_for_timeout(W); m["spk90_neutral"] = page5.evaluate(JS_STATE)
             spk.click(); spk.click(); page5.wait_for_timeout(W)      # complement of speaker90 ...
@@ -875,6 +908,17 @@ def main() -> None:
                       and seg_opacity(dim_on, "0", "speaker91") == [""] and seg_opacity(dim_off, "0", "speaker90") == [""],
             },
             "masks": mask_summary(m, so_off, fixture_groups()),
+            "click_seeks_only": {
+                "paused": {"readout_after_click": cs_paused["readout_after_click"], "playing_300ms_later": cs_paused_state["playing"],
+                           "readout_300ms_later": cs_paused_state["readout"]},
+                "playing": {"readout_after_click": cs_playing["readout_after_click"], "playing_300ms_later": cs_playing_state["playing"],
+                            "readout_300ms_later": cs_playing_state["readout"]},
+                "ok": cs_paused_state["playing"] is False and abs(parse_readout(cs_paused["readout_after_click"]) - 9.0) < 0.05
+                      and cs_paused_state["readout"] == cs_paused["readout_after_click"]
+                      and cs_playing_state["playing"] is True and abs(parse_readout(cs_playing["readout_after_click"]) - 12.0) < 0.05
+                      and parse_readout(cs_playing_state["readout"]) > 12.0,
+            },
+            "gap_jump_rearm": gap_jump_summary(gap_jump),
             "mute_whiteout": {
                 "toggle_texts": [t["text"] for t in mute_on["toggles"]],
                 "after_mute_quiet": {"enabled": mute_on["enabled"], "mute_rows": mute_on["mute_rows"], "quiet_checked": mute_on["toggles"][1]["checked"]},
@@ -1009,6 +1053,22 @@ def audio_drag_summary(a0: dict, mid: dict | None, a1: dict, muted: dict, unmute
               and mid is not None and mid["display"] != "none"
               and muted["enabled"] == [True, False] and muted["mute_tops"] == [{"row": "1", "top": "0px"}] and muted["waveform_canvases"] == N
               and unmuted["enabled"] == [True, True] and unmuted["mute_tops"] == [] and unmuted["waveform_canvases"] == N + 1,
+    }
+
+
+def gap_jump_summary(r: dict) -> dict:
+    s = r["samples"]
+    jump = next((s[i] for i in range(1, len(s)) if s[i - 1][1] < 7.3 and s[i][1] >= 8.3), None)
+    set1 = [c for c in r["calls"] if c["m"] == "setValueAtTime" and c["args"][0] == 1]
+    after = [c["t"] for c in set1 if jump and jump[0] - 60 <= c["t"] <= jump[0] + 1000]
+    return {
+        "samples": len(s), "readout_first_last": [s[0][1], s[-1][1]],
+        "jump_sample": jump, "calls_total": len(r["calls"]),
+        "setValueAtTime_1_times_ms": [c["t"] for c in set1],
+        "rearm_within_1s_after_jump_ms": after,
+        "first_rearm_delay_after_jump_ms": (after[0] - jump[0]) if (after and jump) else None,
+        "playing_after": r["playing_after"],
+        "ok": jump is not None and bool(after) and r["playing_after"] is False,
     }
 
 
