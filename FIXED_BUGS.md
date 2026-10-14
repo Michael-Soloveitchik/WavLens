@@ -124,6 +124,10 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | S10 | Image spanned `n_frames·hop` samples, up to 2.4 % longer than short clips | frames assigned to columns by sample time, span exact | ✅ |
 | S11 | `colormap=` rejected Colormap objects (unhashable) and `"Magma"` | objects accepted, names case-insensitive | ✅ |
 | B35 | First click inside the widget was swallowed: focusing the root on pointerdown could scroll the page under the pointer, so pointerup landed elsewhere | `focus({preventScroll: true})` | ✅ |
+| B36 | Empty mask intersection (e.g. keep `a` + complement `b` with equal segments) threw on play and left a silent ghost playback; threw every tick if emptied while playing | empty result handled: play button disabled with a title, playback paused, no exception | ✅ |
+| B37 | After a masked end before the file end, play could not resume (closed interval kept the end "inside"; 20 ms blip at full level per press) | half-open segments; play from the masked end wraps to the first kept segment with the mask armed synchronously | ✅ |
+| B38 | Seek past the last kept segment while playing left readout and cursor at the seek target | pause writes the clamp to the readout and Python; paused seeks past the end are clamped | ✅ |
+| B39 | Play from inside a gap armed the mask one task late | mask scheduled synchronously from the jump target in the play handler | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Third pass (expander, drag, mix row, mel axis)

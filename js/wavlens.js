@@ -81,7 +81,8 @@ function render({ model, el: host }) {
   // ---- solo set; `keep` = union of their segments (null = nothing soloed)
   const solos = new Map((model.get("solo") || []).map((k) => (k.startsWith("!") ? [k.slice(1), "inv"] : [k, "keep"])));  // key -> mode
   let keep = null;
-  const inKeep = (t) => !keep || keep.some(([a, b]) => t >= a && t <= b);
+  const inKeep = (t) => !keep || keep.some(([a, b]) => t >= a && t < b);  // half-open: the end of the last segment is "outside", so play wraps
+  const lastEnd = () => (keep && keep.length ? keep[keep.length - 1][1] : 0);
   const nextStart = (t) => keep && (keep.find(([a]) => a > t) || [null])[0];
 
   // ---- panel: row 1 time | ◀ play ▶ ; row 2 all/none | fft legend
@@ -222,6 +223,9 @@ function render({ model, el: host }) {
       d.style.outline = mode === "keep" ? "1px solid #e00" : mode === "inv" ? "1px dashed #e00" : "";
     }
     drawMask();
+    const empty = !!keep && !keep.length;
+    if (empty && ws.isPlaying()) ws.pause();
+    play.disabled = empty; play.style.opacity = empty ? ".4" : ""; if (empty) play.title = "nothing to play: the active masks do not overlap";
     scheduleMask();
   };
   const drawMask = () => {  // white-out the gaps on every audio row (wave and spectrogram alike)
@@ -531,12 +535,17 @@ function render({ model, el: host }) {
   let sending = false;
   const sendTime = (t) => { sending = true; model.set("current_time", Math.min(D, Math.max(0, t))); model.save_changes(); sending = false; };
   ws.on("timeupdate", (t) => {
-    if (keep && ws.isPlaying() && !inKeep(t)) {
-      const n = nextStart(t);
-      if (n == null) { ws.pause(); ws.setTime(keep[keep.length - 1][1]); return; }
-      ws.setTime(n);
-      scheduleMask(n);  // from the jump target, not from the gap we left
-      return;
+    if (keep && !keep.length) { if (ws.isPlaying()) ws.pause(); return; }  // empty intersection: nothing to play
+    if (keep && !inKeep(t)) {
+      const e = lastEnd();
+      if (ws.isPlaying()) {
+        const n = nextStart(t);
+        if (n == null) { ws.pause(); ws.setTime(e); timeOut.textContent = `${e.toFixed(3)} s`; sendTime(e); return; }
+        ws.setTime(n);
+        scheduleMask(n);  // from the jump target, not from the gap we left
+        return;
+      }
+      if (t > e + 1e-6) { ws.setTime(e); return; }  // paused seek past the last kept segment: clamp (also catches the stray update after our own clamp)
     }
     timeOut.textContent = `${t.toFixed(3)} s`;
     clearTimeout(flush);
@@ -545,7 +554,9 @@ function render({ model, el: host }) {
     sendTime(t);
   });
   ws.on("play", () => {
-    if (keep && !inKeep(ws.getCurrentTime())) ws.setTime(nextStart(ws.getCurrentTime()) ?? keep[0][0]);
+    if (keep && !keep.length) { ws.pause(); return; }
+    const t0 = ws.getCurrentTime();
+    if (keep && (!inKeep(t0) || t0 >= lastEnd())) { const n = nextStart(t0) ?? keep[0][0]; ws.setTime(n); scheduleMask(n); }  // from a gap or the masked end: next (or first) kept segment, mask armed now
     play.innerHTML = svg(ICON.pause, 29); model.set("playing", true); model.save_changes();
   });
   ws.on("pause", () => {
