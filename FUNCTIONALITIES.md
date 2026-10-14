@@ -50,6 +50,7 @@ As objects:
 | `["0.00 4.98 speaker_0", ...]` (NeMo Sortformer `diarize()`) | list of `"start end label"` strings; a list of such lists = one group per file |
 | `[{"start"/"start_time", "end"/"end_time", "speaker"/"label"}, ...]` (SegLST, WhisperX) | list of dicts |
 | `[(start, end, label), ...]` or `[(start, end), ...]` | list of tuples with numeric first element |
+| `{speaker: [(start, end), ...]}` | ONE annotation, labels = keys (values are bare pairs, `Segment`s or a `Timeline`). A dict whose values carry their own labels (3-tuples, records, speaker dicts, objects, paths) is a dict of named annotations |
 | RTTM text (`"SPEAKER ...\n..."`) | string with newline starting with `SPEAKER ` |
 | HF `ModelOutput` / anything with `.logits` `(B,T,K)` (WavLM frame classification) | attribute; sigmoid, binarized at `threshold` |
 | frame matrix `(T,K)` or `(1,T,K)` array/tensor (Nemotron-3 Sortformer probs) | keyword only; `(K,T)` with K < T is transposed; values outside [0,1] get a sigmoid; binarized at `threshold`; labels `spk<k>`; frames spread evenly over the audio |
@@ -81,7 +82,7 @@ Mirror the `audio` form: dict ↔ dict with the same keys, list ↔ list of the 
 
 ## 7. Colors
 
-`colors=` mirrors the `annotation` form: dict keyed by annotation name (subset ok, unknown keys ignored), list per annotation, or one entry. Each entry: `{speaker: css}` by name (unknown speakers ignored) or a list of css strings in `Annotation.labels()` order. A bare string raises. Default: sorted union of all labels → matplotlib Set1 (pyannote's palette), deterministic for a label set.
+`colors=` is read by shape. `{speaker: css}` (all values css strings) or `[css, ...]` (in `Annotation.labels()` order) is a speaker map and applies to every annotation, whatever the annotation form. A dict whose values are dicts or lists is keyed by annotation name (subset ok, unknown keys ignored); a list of dicts/lists is one entry per annotation. Unknown speakers are ignored. A bare string raises. Default: sorted union of all labels → matplotlib Set1 (pyannote's palette), deterministic for a label set.
 
 ## 8. Spectrogram
 

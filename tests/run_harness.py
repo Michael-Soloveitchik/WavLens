@@ -72,11 +72,12 @@ JS_STATE = """
   const buttons = allButtons.map((b) => b.textContent);
   // Per-audio on/off toggles: pills in gutter column 0 (SVG checkbox + name; older builds: ☑/☐ text).
   const col0Early = document.querySelector('#widget > div > div:nth-child(3) > div');
-  const toggles = (col0Early ? [...col0Early.querySelectorAll('button')].filter((b) => b.querySelector('svg')) : allButtons.filter((b) => /^[☑☐]/.test(b.textContent)))
+  const isExp = (b) => b.classList.contains('exp') || /[▸▾]/.test(b.textContent);
+  const toggles = (col0Early ? [...col0Early.querySelectorAll('button')].filter((b) => !isExp(b) && b.querySelector('svg')) : allButtons.filter((b) => /^[☑☐]/.test(b.textContent)))
     .map((b) => ({ text: b.textContent.trim(), opacity: b.style.opacity, color: b.style.color, title: b.title,
                    checked: !!b.querySelector('svg path'), x: b.getBoundingClientRect().x, y: b.getBoundingClientRect().y }));
-  // Per-group ▸/▾ expanders (column 0) open that annotation's speaker labels in column 1.
-  const expanders = col0Early ? [...col0Early.querySelectorAll('button')].filter((b) => /[▸▾]/.test(b.textContent))
+  // Per-group expanders (column 0, class "exp" with an SVG icon; older builds: ▸/▾ text) open that annotation's speaker labels in column 1.
+  const expanders = col0Early ? [...col0Early.querySelectorAll('button')].filter(isExp)
     .map((b) => ({ text: b.textContent, title: b.title, x: b.getBoundingClientRect().x, y: b.getBoundingClientRect().y })) : [];
   const Dur = window.wavlensModel ? window.wavlensModel.get('duration') : 1;
   const secs = (d) => { const l = parseFloat(d.style.left) / 100 * Dur, w = parseFloat(d.style.width) / 100 * Dur; return [Math.round(l * 1000) / 1000, Math.round((l + w) * 1000) / 1000]; };
@@ -1075,7 +1076,7 @@ def gap_jump_summary(r: dict) -> dict:
 def click_expander(page, idx: int) -> None:
     """Click the ▸/▾ button of lane group `idx` (column 0, in group order)."""
     page.evaluate("""(i) => { const col0 = document.querySelector('#widget > div > div:nth-child(3) > div');
-      const b = [...col0.querySelectorAll('button')].filter((b) => /[▸▾]/.test(b.textContent))[i]; b.click(); }""", idx)
+      const b = [...col0.querySelectorAll('button')].filter((b) => b.classList.contains('exp') || /[▸▾]/.test(b.textContent))[i]; b.click(); }""", idx)
 
 
 def expander_summary(states: list, final: dict) -> dict:

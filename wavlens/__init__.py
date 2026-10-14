@@ -88,9 +88,17 @@ def _is_tuples(o):   # [(start, end[, label]), ...]
         all(isinstance(e, (list, tuple)) and len(e) in (2, 3) and isinstance(e[0], (int, float, np.number)) for e in o)
 
 
+def _is_speaker_dict(o):  # {speaker: [(start, end), ...] | Timeline | Segment}: ONE annotation, labels = keys
+    def bare(v):
+        return isinstance(v, (Timeline, Segment)) or (isinstance(v, (list, tuple)) and len(v) > 0 and all(
+            isinstance(e, Segment) or (isinstance(e, (list, tuple)) and len(e) == 2 and isinstance(e[0], (int, float, np.number)))
+            for e in v))
+    return isinstance(o, dict) and len(o) > 0 and all(bare(v) for v in o.values())
+
+
 def _is_ann(o):
     return isinstance(o, (Annotation, Timeline, Segment)) or _is_ann_path(o) or _is_ann_obj(o) \
-        or _is_lines(o) or _is_records(o) or _is_tuples(o)
+        or _is_lines(o) or _is_records(o) or _is_tuples(o) or _is_speaker_dict(o)
 
 
 def _is_audio(o):
@@ -343,6 +351,14 @@ def _annotation(obj, duration, threshold):
         ann = _from_records(obj)
     elif _is_tuples(obj):
         ann = _from_lines(" ".join(map(str, e)) for e in obj)
+    elif _is_speaker_dict(obj):
+        ann = Annotation()
+        for lab, segs in obj.items():
+            for e in ([segs] if isinstance(segs, Segment) else segs):
+                seg = e if isinstance(e, Segment) else Segment(float(e[0]), float(e[1]))
+                if seg.end <= seg.start:
+                    raise ValueError(f"speaker {lab!r}: segment end must be after start, got {tuple(seg)}")
+                ann[seg] = str(lab)
     elif isinstance(obj, Segment):
         ann = _from_lines([f"{obj.start} {obj.end}"])
     elif isinstance(obj, Timeline):
@@ -377,6 +393,11 @@ def _color_specs(colors, form, n):
     list <-> list per annotation, one <-> one. Returns a dict by name or a list of n specs."""
     if colors is None:
         return [None] * n
+    css = lambda v: isinstance(v, str)
+    if isinstance(colors, dict) and all(map(css, colors.values())):   # {speaker: css}: a speaker map, for every annotation
+        return [colors] * n
+    if isinstance(colors, (list, tuple)) and len(colors) > 0 and all(map(css, colors)):  # [css, ...] in labels() order
+        return [list(colors)] * n
     if isinstance(form, dict):
         if not isinstance(colors, dict):
             raise ValueError("colors must be a dict keyed by annotation name when annotation is a dict")

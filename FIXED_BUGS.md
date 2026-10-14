@@ -115,6 +115,8 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | B34 | With a mask active, no sound after the playhead skipped a gap: the mask automation was computed once at solo time (the `play` / `seeking` re-scheduling hooks had been lost in a rewrite) and, when re-armed from the `seeking` event, used the pre-jump position | re-scheduled on every play and seek (after the player takes the new position) and explicitly from the jump target | ✅ |
 | R15 | Clicking the rows started playback; now click = seek only, paused stays paused | ✅ |
 | R16 | Calmer controls: 9 px hollow checkbox with a thin green check, no unicode glyphs; expander is a small SVG chevron (`button.exp`, rotates when open) | ✅ |
+| 47 | `colors={speaker: css}` with `annotation={"name": ...}` was matched against annotation names, so nothing applied and the Set1 defaults (red/blue) stayed | colors read by shape: css-valued dict or css list = speaker map for every annotation; dict/list-valued = per annotation | ✅ |
+| 48 | `{speaker: [(start, end), ...]}` was not an accepted annotation form | one annotation with labels from the keys; a dict whose values carry labels (3-tuples, records, speaker dicts, objects, paths) stays a dict of annotations | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Third pass (expander, drag, mix row, mel axis)
