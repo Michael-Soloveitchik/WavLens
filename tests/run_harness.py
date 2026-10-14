@@ -173,6 +173,10 @@ JS_STATE = """
     overlay_height: overlay ? overlay.getBoundingClientRect().height : null,
     spec_height: specHost ? parseFloat(specHost.style.height) : null,
     gains: (window.wavlensGains || []).map((g) => Math.round(g.gain.value * 1000) / 1000),
+    // While paused the player's source is disconnected, so Chrome does not render the gain nodes and .value freezes;
+    // the scheduled targets (last two setTargetAtTime calls = the per-audio gains) are the authoritative state then.
+    gain_targets_tail: (window.wavlensParamCalls || []).filter((c) => c.m === 'setTargetAtTime').slice(-2).map((c) => c.args[0]),
+    ctx_states: (window.wavlensContexts || []).map((c) => c.state),
     channel_marks: canvasesPart ? [...canvasesPart.children].map((c) => ({ canvases: c.querySelectorAll('canvas').length, marked: [...c.querySelectorAll('canvas')].filter((x) => x.dataset.wavlensMark).length })) : [],
     solo: window.wavlensModel && window.wavlensModel.get('solo'),
     log_tail: (window.wavlensLog || []).slice(-5),
@@ -1017,6 +1021,8 @@ def mix_row_summary(before: dict, muted: dict, unmuted: dict, fixture: dict) -> 
         "buttons": before["buttons"],
         "overlay_height": before["overlay_height"], "spec_height": before["spec_height"],
         "gains_before": before["gains"], "gains_muted": muted["gains"], "gains_unmuted": unmuted["gains"],
+        "gain_targets_muted": muted["gain_targets_tail"], "gain_targets_unmuted": unmuted["gain_targets_tail"],
+        "gains_note": "live .value only advances while the player renders; scheduled targets are checked when paused",
         "enabled_echo_muted": muted["enabled"],
         "channel_marks_before": before["channel_marks"], "channel_marks_200ms_after_mute": muted["channel_marks"],
         # Muting down to one enabled audio removes the mix row: N canvases, N*H heights, no "mix" label; unmute restores N+1.
@@ -1028,7 +1034,9 @@ def mix_row_summary(before: dict, muted: dict, unmuted: dict, fixture: dict) -> 
         "ok": before["peaks_len"] == R and before["spectrograms_len"] == R and before["waveform_canvases"] == R
               and len(before["mix_label"]) == 1 and before["mixframes"] == 1 and "mix" not in before["buttons"]
               and before["overlay_height"] == R * H and before["spec_height"] == R * H
-              and audio_gains(before)[:N] == [round(1 / N, 3)] * N and audio_gains(muted)[:N] == [1.0, 0.0]
+              and audio_gains(before)[:N] == [round(1 / N, 3)] * N
+              and (audio_gains(muted)[:N] == [1.0, 0.0] or muted["gain_targets_tail"] == [1, 0])
+              and (audio_gains(unmuted)[:N] == [0.5, 0.5] or unmuted["gain_targets_tail"] == [0.5, 0.5])
               and muted["enabled"] == [True, False]
               and muted["waveform_canvases"] == N and muted["overlay_height"] == N * H and len(muted["mix_label"]) == 0
               and unmuted["waveform_canvases"] == R and len(unmuted["mix_label"]) == 1
