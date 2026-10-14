@@ -67,7 +67,10 @@ function union(segs) {
 
 function render({ model, el: host }) {
   const H = model.get("height"), N = model.get("channels") || 1, D = model.get("duration"), RH = model.get("row_height") || 16;
-  const R = N + (N >= 2 ? 1 : 0);  // audio rows drawn: the inputs plus, with >= 2 audios, the mix row (mean of the enabled ones)
+  let order = (model.get("order") || []).slice();  // display order of the audio rows (original indices)
+  if (order.length !== N || new Set(order).size !== N) order = [...Array(N).keys()];
+  const nOn = () => enabled.filter(Boolean).length;
+  const R = () => N + (nOn() >= 2 ? 1 : 0);  // audio rows drawn: the inputs plus, while >= 2 are selected, the mix row
   const subs = [], on = (ev, cb) => { model.on(ev, cb); subs.push([ev, cb]); };  // removed on destroy
   const viewId = Symbol("view");  // several views of one model: only the one that started playback makes sound
   const step = model.get("step") || 0.01;
@@ -101,8 +104,9 @@ function render({ model, el: host }) {
   host.appendChild(root);
 
   const ws = WaveSurfer.create({
-    container: wsHost, url: model.get("audio_url"), peaks: model.get("peaks"), duration: D, backend: "WebAudio",
-    height: H, splitChannels: R > 1 ? Array.from({ length: R }, () => ({ height: H })) : undefined,
+    container: wsHost, url: model.get("audio_url"), duration: D, backend: "WebAudio",
+    peaks: order.map((i) => (model.get("peaks") || [])[i]).concat(R() > N ? [(model.get("peaks") || [])[N]] : []).filter(Boolean),
+    height: H, splitChannels: N >= 2 ? Array.from({ length: N + 1 }, () => ({ height: H })) : undefined,
     waveColor: "#9e9e9e", progressColor: "#9e9e9e", cursorColor: "#e00", cursorWidth: 2,
     autoScroll: true, autoCenter: true,
     plugins: [],
@@ -111,8 +115,8 @@ function render({ model, el: host }) {
   ws.on("scroll", () => (zoomPlugin.oldX = 0));   // upstream caches the pointer time while the mouse is still;
   ws.on("seeking", () => (zoomPlugin.oldX = 0));  // invalidate it whenever the view or position moved
   const wrapper = ws.getWrapper();
-  const spec = el("div", `display:none;position:relative;height:${H * R}px;`);
-  const overlay = el("div", `position:absolute;left:0;top:0;width:100%;height:${R * H}px;z-index:4;pointer-events:none;`); // functions + white-out
+  const spec = el("div", `display:none;position:relative;height:${H * R()}px;`);
+  const overlay = el("div", `position:absolute;left:0;top:0;width:100%;height:${R() * H}px;z-index:4;pointer-events:none;`); // functions + white-out
   const timeHost = el("div", `position:relative;height:${TIMELINE_H}px;`);
   const lanes = el("div", "position:relative;width:100%;font-family:sans-serif;user-select:none;");
   wrapper.append(spec, overlay, timeHost, lanes);
@@ -140,35 +144,34 @@ function render({ model, el: host }) {
         : `<svg width="11" height="11" viewBox="0 0 12 12" style="vertical-align:-1px;margin-right:5px"><rect x=".75" y=".75" width="10.5" height="10.5" rx="2.5" fill="#fff" stroke="#9e9e9e" stroke-width="1.5"/></svg>`) +
         (model.get("audio_names")?.[i] || "");
       const m = overlay.querySelector(`.mute[data-row="${i}"]`);  // muted rows look like masked gaps
-      if (!on && !m) { const d = el("div", `position:absolute;left:0;width:100%;top:${i * H}px;height:${H}px;background:rgba(255,255,255,.85);`); d.className = "mute"; d.dataset.row = i; overlay.appendChild(d); }
+      if (!on && !m) { const d = el("div", `position:absolute;left:0;width:100%;top:${order.indexOf(i) * H}px;height:${H}px;background:rgba(255,255,255,.85);`); d.className = "mute"; d.dataset.row = i; overlay.appendChild(d); }
       if (on && m) m.remove();
       t.style.color = on ? "#222" : "#999";
       t.style.borderColor = on ? "#9ccc9e" : "#ddd";
       t.title = on ? "playing, click to mute" : "muted, click to play";
     });
   };
-  const setEnabled = (arr) => { enabled = arr; model.set("enabled", arr.slice()); model.save_changes(); applyEnabled(); renderMix(); };
+  const setEnabled = (arr) => { const was = R(); enabled = arr; model.set("enabled", arr.slice()); model.save_changes(); if (R() !== was) draw(); else applyEnabled(); renderMix(); };
   allBtn.onclick = () => { const on = !enabled.every(Boolean); setEnabled(enabled.map(() => on)); };
   on("change:weighted", applyEnabled);
-  on("change:enabled", () => { enabled = (model.get("enabled") || []).slice(0, N); while (enabled.length < N) enabled.push(true); applyEnabled(); renderMix(); });
+  on("change:enabled", () => { enabled = (model.get("enabled") || []).slice(0, N); while (enabled.length < N) enabled.push(true); draw(); renderMix(); });
+  on("change:order", () => { const o = (model.get("order") || []).slice(); if (o.length === N && new Set(o).size === N) { order = o; draw(); renderMix(); } });
   on("change:spectrograms", () => draw());
 
   // ---- solo: silence outside the kept segments (masked buffer) and skip the gaps while playing
   let orig = null;
   // Rendering buffer = the inputs plus the mix row (mean of the enabled ones); playback keeps the N-channel buffer.
-  const withMix = (buf) => {
-    if (R === N) return buf;
-    const out = ctx.createBuffer(R, buf.length, buf.sampleRate), mix = out.getChannelData(N);
-    const g1 = 1 / Math.max(1, enabled.filter(Boolean).length);
-    for (let c = 0; c < N; c++) {
-      const src = buf.getChannelData(c);
-      out.copyToChannel(src, c);
-      if (enabled[c]) for (let i = 0; i < src.length; i++) mix[i] += src[i] * g1;
+  const withMix = (buf) => {  // rows in display order, plus the mix (mean of the enabled) while >= 2 are enabled
+    const rows = R(), out = ctx.createBuffer(rows, buf.length, buf.sampleRate);
+    for (let r = 0; r < N; r++) out.copyToChannel(buf.getChannelData(order[r]), r);
+    if (rows > N) {
+      const mix = out.getChannelData(N), g1 = 1 / Math.max(1, nOn());
+      for (let c = 0; c < N; c++) if (enabled[c]) { const src = buf.getChannelData(c); for (let i = 0; i < src.length; i++) mix[i] += src[i] * g1; }
     }
     return out;
   };
   let mixTimer;
-  const renderMix = () => { if (!orig || R === N) return; clearTimeout(mixTimer); mixTimer = setTimeout(() => { ws.decodedData = withMix(orig); ws.renderer.render(ws.decodedData); }, 30); };
+  const renderMix = () => { if (!orig) return; clearTimeout(mixTimer); mixTimer = setTimeout(() => { ws.decodedData = withMix(orig); ws.renderer.render(ws.decodedData); }, 30); };
   const segsOf = (key) => {
     const [kind, gi, lab] = key.split(":"), g = (model.get("groups") || [])[+gi] || { segments: [] };
     return union(g.segments.filter((s) => kind === "g" || s.label === lab).map((s) => [s.start, s.end]));
@@ -266,29 +269,38 @@ function render({ model, el: host }) {
     col0.innerHTML = "";
     col1.innerHTML = "";
     lanes.innerHTML = "";
-    overlay.querySelectorAll(".fn, .mixframe").forEach((d) => d.remove());
+    overlay.querySelectorAll(".fn, .mixframe, .mute").forEach((d) => d.remove());
+    const rows = R();
+    spec.style.height = overlay.style.height = `${rows * H}px`;
     spec.innerHTML = "";
     toggles.length = 0;
     segDivs.length = 0;
     const fns = model.get("functions") || [], groups = model.get("groups") || [];
     const pct = (t) => `${(100 * t) / D}%`;
-    (model.get("spectrograms") || []).forEach((src, i) => {
-      if (src) spec.appendChild(Object.assign(el("img", `position:absolute;left:0;top:${i * H}px;width:100%;height:${H}px;`), { src }));
-    });
-    for (let i = 0; i < R; i++) {
-      if (i < N) {
-        const t = pill("", `position:absolute;left:4px;top:${i * H + 3}px;padding:0 7px 0 6px;border-radius:9px;line-height:16px;`);
-        t.onclick = () => setEnabled(enabled.map((on, k) => (k === i ? !on : on)));
-        toggles.push(t);
+    const specs = model.get("spectrograms") || [];
+    for (let r = 0; r < rows; r++) {
+      const src = specs[r < N ? order[r] : N];
+      if (src) spec.appendChild(Object.assign(el("img", `position:absolute;left:0;top:${r * H}px;width:100%;height:${H}px;`), { src }));
+    }
+    for (let r = 0; r < rows; r++) {
+      const i = r < N ? order[r] : -2;  // original audio index shown in this row (-2 = mix)
+      if (r < N) {
+        const t = pill("", `position:absolute;left:4px;top:${r * H + 3}px;padding:0 7px 0 6px;border-radius:9px;line-height:16px;`);
+        t.onclick = () => { if (t.dataset.dragged) { delete t.dataset.dragged; return; } setEnabled(enabled.map((on, k) => (k === i ? !on : on))); };
+        dragRows(t, r, () => Array.from({ length: N + 1 }, (_, k) => k * H), (from, dest) => {
+          order.splice(dest, 0, order.splice(from, 1)[0]);
+          model.set("order", order.slice()); model.save_changes(); draw(); renderMix();
+        });
+        toggles[i] = t;
         col0.appendChild(t);
       } else {  // mix row: not selectable, framed in blue
-        col0.appendChild(el("div", `position:absolute;left:4px;top:${i * H + 3}px;font:600 10px sans-serif;color:#1e88e5;padding:1px 7px;border:1px solid #1e88e5;border-radius:9px;line-height:14px;`, "mix"));
-        const fr = el("div", `position:absolute;left:0;width:100%;top:${i * H}px;height:${H}px;box-sizing:border-box;border-top:1.5px solid #1e88e5;border-bottom:1.5px solid #1e88e5;background:rgba(30,136,229,.04);`);
+        col0.appendChild(el("div", `position:absolute;left:4px;top:${r * H + 3}px;font:600 10px sans-serif;color:#1e88e5;padding:1px 7px;border:1px solid #1e88e5;border-radius:9px;line-height:14px;`, "mix"));
+        const fr = el("div", `position:absolute;left:0;width:100%;top:${r * H}px;height:${H}px;box-sizing:border-box;border-top:1.5px solid #1e88e5;border-bottom:1.5px solid #1e88e5;background:rgba(30,136,229,.04);`);
         fr.className = "mixframe";
         overlay.appendChild(fr);
       }
       const own = fns.filter((f) => f.row === i || f.row === -1 || f.row == null);
-      if (own.length) overlay.appendChild(lines(own, i * H, H));
+      if (own.length) overlay.appendChild(lines(own, r * H, H));
     }
     applyEnabled();
     const nrows = groups.reduce((n, g) => n + g.rows.length, 0);
@@ -304,8 +316,7 @@ function render({ model, el: host }) {
         const h = Math.max(RH - 2, 2);
         const d = el("div",
           `position:absolute;top:${top + g.rows.indexOf(s.label) * RH + 1}px;height:${h}px;left:${pct(s.start)};width:${pct(s.end - s.start)};` +
-          `background:${s.color};color:#fff;border-radius:2px;overflow:hidden;white-space:nowrap;text-indent:3px;box-sizing:border-box;line-height:${h}px;font-size:${Math.min(11, RH - 4)}px;`,
-          s.label);
+          `background:${s.color};border-radius:2px;box-sizing:border-box;`);  // no text on the segment: names live in the ▸ column
         d.title = `${s.label} ${s.start.toFixed(2)}–${s.end.toFixed(2)}s`;
         d.dataset.group = gi;
         d.dataset.label = s.label;
@@ -338,24 +349,19 @@ function render({ model, el: host }) {
   // Drag an annotation name up/down to reorder the lane groups; a click (< 5 px) is left to the mask cycle.
   const marker = el("div", "position:absolute;left:0;right:0;height:0;border-top:2px solid #1e88e5;display:none;z-index:9;pointer-events:none;");
   wave.appendChild(marker);
-  const draggable = (d, gi) => {
+  // Generic row drag: `bounds()` gives the row boundaries (wave coordinates), `commit(from, dest)` applies the move.
+  const dragRows = (d, from, bounds, commit) => {
     d.style.touchAction = "none";
     d.onpointerdown = (e0) => {
-      const groups = model.get("groups") || [];
-      let y0 = e0.clientY, moved = false, target = gi;
-      const bounds = () => {  // y of each group boundary (top of group k), in wave coordinates
-        const laneTop = lanes.offsetTop, out = [laneTop];
-        for (const g of groups) out.push(out[out.length - 1] + g.rows.length * RH);
-        return out;
-      };
+      let y0 = e0.clientY, moved = false, target = from;
       const move = (e) => {
         if (!moved && Math.abs(e.clientY - y0) < 5) return;
         moved = true;
         d.style.opacity = ".4";
-        const b = bounds(), y = e.clientY - wave.getBoundingClientRect().top;
+        const b = bounds(), n = b.length - 1, y = e.clientY - wave.getBoundingClientRect().top;
         target = 0;
-        for (let k = 0; k < groups.length; k++) if (y > (b[k] + b[k + 1]) / 2) target = k + 1;
-        marker.style.top = `${b[Math.min(target, groups.length)]}px`;
+        for (let k = 0; k < n; k++) if (y > (b[k] + b[k + 1]) / 2) target = k + 1;
+        marker.style.top = `${b[Math.min(target, n)]}px`;
         marker.style.display = "";
       };
       const up = () => {
@@ -365,24 +371,30 @@ function render({ model, el: host }) {
         d.style.opacity = "";
         if (!moved) return;
         d.dataset.dragged = "1";  // swallow the click that follows a drag
-        const dest = target > gi ? target - 1 : target;
-        if (dest === gi) return;
-        const order = groups.map((_, k) => k);
-        order.splice(dest, 0, order.splice(gi, 1)[0]);
-        const remap = (key) => { const [kind, i, ...rest] = key.split(":"); return [kind, order.indexOf(+i), ...rest].join(":"); };
-        for (const [k, m] of [...solos]) { solos.delete(k); solos.set(remap(k), m); }
-        for (const k of [...dimmed]) { dimmed.delete(k); dimmed.add(remap(k)); }
-        model.set("groups", order.map((k) => groups[k]));
-        model.set("solo", soloState());
-        model.set("dimmed", [...dimmed]);
-        model.save_changes();
-        draw();
-        applySolo();
+        const dest = target > from ? target - 1 : target;
+        if (dest !== from) commit(from, dest);
       };
       document.addEventListener("pointermove", move);
       document.addEventListener("pointerup", up);
     };
   };
+  const draggable = (d, gi) => dragRows(d, gi, () => {  // annotation groups: boundaries at group tops
+    const groups = model.get("groups") || [], out = [lanes.offsetTop];
+    for (const g of groups) out.push(out[out.length - 1] + g.rows.length * RH);
+    return out;
+  }, (from, dest) => {
+    const groups = model.get("groups") || [], perm = groups.map((_, k) => k);
+    perm.splice(dest, 0, perm.splice(from, 1)[0]);
+    const remap = (key) => { const [kind, i, ...rest] = key.split(":"); return [kind, perm.indexOf(+i), ...rest].join(":"); };
+    for (const [k, m] of [...solos]) { solos.delete(k); solos.set(remap(k), m); }
+    for (const k of [...dimmed]) { dimmed.delete(k); dimmed.add(remap(k)); }
+    model.set("groups", perm.map((k) => groups[k]));
+    model.set("solo", soloState());
+    model.set("dimmed", [...dimmed]);
+    model.save_changes();
+    draw();
+    applySolo();
+  });
   draw();
   ws.on("ready", draw);
   ["groups", "functions", "audio_names"].forEach((k) => on(`change:${k}`, () => {

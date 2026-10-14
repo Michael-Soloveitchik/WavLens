@@ -3,7 +3,8 @@
 Interactive waveform, spectrogram, speaker-diarization lanes and a moving playhead, in Jupyter. pyannote-native, NeMo / WavLM aware, one `show()` call.
 
 ```bash
-pip install wavlens[all]
+pip install "wavlens[all]"                                              # PyPI
+pip install "wavlens[all] @ git+https://github.com/Michael-Soloveitchik/WavLens.git"   # latest from GitHub
 ```
 
 ```python
@@ -31,7 +32,7 @@ Click a speaker or an annotation name: keep its segments → keep the complement
 
 ![many](docs/many.png)
 
-Any number of annotations and speakers: the lane block grows (`row_height`); the `▸` beside a name opens that annotation's speaker column; drag a name to reorder the groups; colours are deterministic (Set1, pyannote's palette) or yours via `colors=`.
+Any number of annotations and speakers: the lane block grows (`row_height`); the `▸` beside a name opens that annotation's speaker column; drag a name (or an audio's pill) to reorder; colours are deterministic (Set1, pyannote's palette) or yours via `colors=`.
 
 ## Inputs
 

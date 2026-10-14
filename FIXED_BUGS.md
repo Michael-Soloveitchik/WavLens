@@ -103,6 +103,9 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | R10 | Mix row: with ≥ 2 audios a framed, non-selectable row above the timeline shows the mean of the selected audios (waveform and spectrogram), live on toggles | ✅ |
 | R11 | Playback gain is 1/m over the m selected audios, explicit weights included (was 1 with weights) | ✅ |
 | B27 | Mix-row frame appended on every redraw (DOM leak, background darkening) | class `mixframe`, cleared in `draw()` | ✅ |
+| R12 | Audio rows are reorderable by dragging the checkbox pill; `order` trait / argument (permutation, validated) | ✅ |
+| R13 | Mix row shown only while at least two audios are selected; rows, heights and toggles follow live | ✅ |
+| R14 | No text on the segments; speaker names only in the expander column (and the hover title) | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Lifecycle and sync

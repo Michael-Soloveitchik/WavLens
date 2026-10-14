@@ -618,6 +618,7 @@ class WavLens(anywidget.AnyWidget):
     duration = traitlets.Float(0.0).tag(sync=True)
     groups = traitlets.List([]).tag(sync=True, echo_update=False)  # [{"name", "rows", "segments"}, ...]; the browser reorders by drag
     expanded = traitlets.List(traitlets.Unicode()).tag(sync=True, echo_update=False)  # annotation names whose legend column is open
+    order = traitlets.List(traitlets.Int()).tag(sync=True, echo_update=False)        # display order of the audio rows (original indices); drag to change
     functions = traitlets.List([]).tag(sync=True)       # [{"name", "color", "row", "x", "y"}, ...]; row = audio index or -1
     peaks = traitlets.List([]).tag(sync=True)           # per audio (+ the mix row when >= 2 audios): abs-max bins
     spectrograms = traitlets.List([]).tag(sync=True)    # per audio (+ mix): JPEG data URL, stretched to the row
@@ -649,6 +650,13 @@ class WavLens(anywidget.AnyWidget):
         v = float(p["value"])
         if not np.isfinite(v) or v < 0 or (p["trait"].name == "step" and v == 0):
             raise traitlets.TraitError(f"{p['trait'].name} must be finite and {'> 0' if p['trait'].name == 'step' else '>= 0'}")
+        return v
+
+    @traitlets.validate("order")
+    def _order_perm(self, p):
+        v = [int(i) for i in p["value"]]
+        if sorted(v) != list(range(self.channels)):
+            raise traitlets.TraitError(f"order must be a permutation of range({self.channels}), got {v}")
         return v
 
     @traitlets.validate("enabled")
@@ -746,7 +754,7 @@ wavlens_mod.default.render({{model,el:document.getElementById("wavlens")}});}})(
 def show(*items, audio=None, annotation=None, function=None, sample_rate=None, height=96, row_height=16,
          weights=None, interpolation="linear", colors=None, colormap="magma", view="wave", expanded=(),
          step=0.01, enabled=None, solo=None, dim=(), zoom=0.0, time=0.0, autoplay=False, threshold=0.5,
-         fscale="mel", fmax=None):
+         fscale="mel", fmax=None, order=None):
     """wavlens.show(audio, annotation, ...) positional in any order, or by keyword.
 
     audio:      path | pyannote AudioFile dict {"audio": path} or {"waveform": array, "sample_rate": sr}
@@ -786,7 +794,9 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
                 fmax: top of the frequency axis in Hz (default Nyquist), e.g. 5000 for speech.
     view:       "wave" | "fft". expanded: annotation names whose speaker legend column starts open
                 (True = all); the ▸ button beside each name toggles it in the browser. Drag a name up or
-                down to reorder the lane groups (the order is reflected in w.groups).
+                down to reorder the lane groups (the order is reflected in w.groups); drag an audio's
+                checkbox pill to reorder the audio rows (`order`, a permutation of the original indices).
+                The mix row is shown while at least two audios are selected.
     height / row_height: px per audio row / per annotation label row. step: seconds per ◀ / ▶.
     enabled / solo ('ann', 'ann/speaker', '!ann/speaker' for the complement, or a list; several
                 intersect) / dim / zoom (px per second, 0 = fit) / time / autoplay:
@@ -845,6 +855,7 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
     if len(loaded) >= 2:
         w._mix = (xs, sr, colormap, height, fscale, fmax)
     w.enabled = [bool(e) for e in enabled] if enabled is not None else [True] * len(loaded)
+    w.order = list(range(len(loaded))) if order is None else [int(i) for i in order]
     names_g = [g["name"] for g in w.groups]
     w.expanded = names_g if expanded is True else [n for n in ([expanded] if isinstance(expanded, str) else expanded) if n in names_g]
     if solo is not None and solo != [] and solo != "":
