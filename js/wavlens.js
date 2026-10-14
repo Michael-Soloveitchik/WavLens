@@ -134,6 +134,7 @@ function render({ model, el: host }) {
   const toggles = [];
   const applyEnabled = () => {
     allBtn.textContent = enabled.every(Boolean) ? "none" : "all";
+    refreshMixSpec();
     const g1 = 1 / Math.max(1, enabled.filter(Boolean).length);  // 1/m over the m selected audios, weights or not
     enabled.forEach((on, i) => {
       gains[i].gain.setTargetAtTime(on ? g1 : 0, ctx.currentTime, 0.01);
@@ -156,6 +157,8 @@ function render({ model, el: host }) {
   on("change:enabled", () => { enabled = (model.get("enabled") || []).slice(0, N); while (enabled.length < N) enabled.push(true); draw(); renderMix(); });
   on("change:order", () => { const o = (model.get("order") || []).slice(); if (o.length === N && new Set(o).size === N && o.every((i) => i >= 0 && i < N)) { order = o; draw(); renderMix(); } });
   on("change:spectrograms", () => draw());
+  on("change:mix_specs", () => draw());
+  on("change:mix_mask", () => draw());
 
   // ---- solo: silence outside the kept segments (masked buffer) and skip the gaps while playing
   let orig = null;
@@ -256,6 +259,47 @@ function render({ model, el: host }) {
     };
   };
 
+  // Spectrogram images carry up to 4000 columns; when the view shows fewer pixels than columns the browser
+  // samples columns (impulses flicker 0.7–1.0). Box-resample through a bitmap instead; above 1:1 the img is fine.
+  let fitTimer = 0;
+  const fitSpecs = () => {
+    const dpr = window.devicePixelRatio || 1, cssW = spec.clientWidth, W = Math.round(cssW * dpr);
+    if (!cssW) return;
+    for (const img of spec.querySelectorAll("img.specimg")) {
+      const go = () => {
+        let cv = img._cv;
+        if (img.naturalWidth > 1.3 * cssW) {
+          if (!cv) { cv = img._cv = el("canvas", img.style.cssText); cv.setAttribute("class", "specfit"); img.after(cv); }
+          if (cv.dataset.w === String(W)) { img.style.visibility = "hidden"; cv.style.display = ""; return; }
+          cv.dataset.w = String(W);
+          createImageBitmap(img, { resizeWidth: W, resizeHeight: Math.round(H * dpr), resizeQuality: "high" }).then((bm) => {
+            cv.width = bm.width; cv.height = bm.height; cv.getContext("2d").drawImage(bm, 0, 0); bm.close();
+            img.style.visibility = "hidden"; cv.style.display = "";
+          }).catch(() => { img.style.visibility = ""; });
+        } else if (cv) { cv.style.display = "none"; img.style.visibility = ""; }
+      };
+      img.complete && img.naturalWidth ? go() : (img.onload = go);
+    }
+  };
+  const fitSpecsSoon = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitSpecs, 120); };
+  const specEl = (src, r, mix) => {  // one spectrogram row; without a source the mix row says why (standalone export)
+    const node = src
+      ? Object.assign(el("img", `position:absolute;left:0;top:${r * H}px;width:100%;height:${H}px;`), { src })
+      : el("div", `position:absolute;left:0;top:${r * H}px;width:100%;height:${H}px;background:#f4f4f4;color:#999;font:11px sans-serif;display:flex;align-items:center;justify-content:center;`, "mix spectrogram for this selection needs the kernel");
+    node.setAttribute("class", (src ? "specimg" : "specnote") + (mix ? " mixspec" : ""));
+    return node;
+  };
+  const refreshMixSpec = () => {  // the mix row's spectrogram follows the selection: precomputed subset, kernel result, or a note
+    spec.querySelectorAll(".mixspec").forEach((d) => { if (d._cv) d._cv.remove(); d.remove(); });
+    const specs = model.get("spectrograms") || [];
+    if (R() <= N || !specs.some(Boolean)) { fitSpecsSoon(); return; }
+    const key = enabled.map((b) => (b ? 1 : 0)).join(""), mixSpecs = model.get("mix_specs") || {}, mixMask = model.get("mix_mask") || [];
+    const src = mixSpecs[key] || (mixMask.length === N && mixMask.every((b, i) => !!b === !!enabled[i]) ? specs[N] : null);
+    spec.appendChild(specEl(src, N, true));
+    fitSpecsSoon();
+  };
+  ws.on("zoom", fitSpecsSoon);
+
   // ---- drawing (original time axis)
   const lines = (fns, top, height) => {
     const s = document.createElementNS(NS, "svg");
@@ -282,16 +326,14 @@ function render({ model, el: host }) {
     overlay.querySelectorAll(".fn, .mixframe, .mute").forEach((d) => d.remove());
     const rows = R();
     spec.style.height = overlay.style.height = `${rows * H}px`;
-    spec.innerHTML = "";
+    spec.innerHTML = "";  // imgs and their resampled canvases
     toggles.length = 0;
     segDivs.length = 0;
     const fns = model.get("functions") || [], groups = model.get("groups") || [];
     const pct = (t) => `${(100 * t) / D}%`;
     const specs = model.get("spectrograms") || [];
-    for (let r = 0; r < rows; r++) {
-      const src = specs[r < N ? order[r] : N];
-      if (src) spec.appendChild(Object.assign(el("img", `position:absolute;left:0;top:${r * H}px;width:100%;height:${H}px;`), { src }));
-    }
+    for (let r = 0; r < Math.min(rows, N); r++) spec.appendChild(specEl(specs[order[r]], r, false));
+    refreshMixSpec();
     for (let r = 0; r < rows; r++) {
       const i = r < N ? order[r] : -2;  // original audio index shown in this row (-2 = mix)
       if (r < N) {
@@ -439,7 +481,7 @@ function render({ model, el: host }) {
   }));
   // Rendered while hidden (collapsed output): the gutter measures 0; re-fit when it becomes visible.
   let seenWidth = root.clientWidth;
-  const ro = new ResizeObserver(() => { if (seenWidth === 0 && root.clientWidth > 0) draw(); seenWidth = root.clientWidth; });
+  const ro = new ResizeObserver(() => { if (seenWidth === 0 && root.clientWidth > 0) draw(); else fitSpecsSoon(); seenWidth = root.clientWidth; });
   ro.observe(root);
   if (!(model.get("spectrograms") || []).some(Boolean)) { fft.disabled = true; fft.title = "no spectrogram (matplotlib missing)"; fft.style.opacity = ".4"; }
   on("change:expanded", () => { expanded.clear(); for (const n of model.get("expanded") || []) expanded.add(n); draw(); });
@@ -461,7 +503,7 @@ function render({ model, el: host }) {
   play.onclick = playPause;
   root.tabIndex = 0;
   root.style.outline = "none";
-  root.addEventListener("pointerdown", () => root.focus());
+  root.addEventListener("pointerdown", () => root.focus({ preventScroll: true }));  // focus for the keys; never scroll the page under the pointer
   root.addEventListener("keydown", (e) => {
     const act = { Space: playPause, ArrowLeft: () => nudge(-step), ArrowRight: () => nudge(step) }[e.code];
     if (act) { e.preventDefault(); e.stopPropagation(); act(); }
@@ -527,6 +569,7 @@ function render({ model, el: host }) {
   on("change:current_time", () => { if (!sending && model.get("playing") && model._wavlensActive !== viewId && !ws.isPlaying()) ws.setTime(model.get("current_time")); });
 
   return () => {  // destroy: stop sound, release the AudioContext, drop every listener and timer
+    clearTimeout(fitTimer);
     clearTimeout(hold); clearTimeout(flush);
     ro.disconnect();
     try { ws.pause(); } catch (e) { /* already gone */ }

@@ -78,7 +78,8 @@ JS_STATE = """
                    checked: !!b.querySelector('svg path'), x: b.getBoundingClientRect().x, y: b.getBoundingClientRect().y }));
   // Per-group expanders (column 0, class "exp" with an SVG icon; older builds: ▸/▾ text) open that annotation's speaker labels in column 1.
   const expanders = col0Early ? [...col0Early.querySelectorAll('button')].filter(isExp)
-    .map((b) => ({ text: b.textContent, title: b.title, x: b.getBoundingClientRect().x, y: b.getBoundingClientRect().y })) : [];
+    .map((b) => ({ text: b.textContent, title: b.title, aria: b.getAttribute('aria-label'), has_svg: !!b.querySelector('svg'),
+                   x: b.getBoundingClientRect().x, y: b.getBoundingClientRect().y })) : [];
   const Dur = window.wavlensModel ? window.wavlensModel.get('duration') : 1;
   const secs = (d) => { const l = parseFloat(d.style.left) / 100 * Dur, w = parseFloat(d.style.width) / 100 * Dur; return [Math.round(l * 1000) / 1000, Math.round((l + w) * 1000) / 1000]; };
   const modeBtn = allButtons.find((b) => /^(all|none)$/.test(b.textContent));
@@ -1091,13 +1092,18 @@ def expander_summary(states: list, final: dict) -> dict:
     steps = ["start", "open_1", "open_0_too", "close_1", "close_0"]
     out = {}
     for name, s in zip(steps, states):
-        out[name] = {"expanded": s["expanded"], "expander_texts": [e["text"] for e in s["expanders"]],
+        out[name] = {"expanded": s["expanded"], "expander_aria": [e["aria"] for e in s["expanders"]],
+                     "expander_svg": all(e["has_svg"] for e in s["expanders"]) and bool(s["expanders"]),
                      "col1_display": s["col1_display"], "col1_labels": [l["key"] for l in s["col1_labels"]],
                      "col0_width": s["gutter_widths"][0], "col1_width": s["gutter_widths"][1],
                      "segments_with_text": s["lane_segments_with_text"]}
     exp = [s["expanded"] for s in states]
     labels = [[l["key"] for l in s["col1_labels"]] for s in states]
-    ok = (exp == [[], ["speech"], ["speech", "reference"], ["reference"], []]
+    aria = [[e["aria"] for e in s["expanders"]] for s in states]
+    aria_ok = aria == [["expand", "expand"], ["expand", "collapse"], ["collapse", "collapse"], ["collapse", "expand"], ["expand", "expand"]]
+    out["aria_sequence_ok"] = aria_ok
+    out["toggle_texts"] = [t["text"] for t in states[0]["toggles"]]
+    ok = aria_ok and (exp == [[], ["speech"], ["speech", "reference"], ["reference"], []]
           and labels[1] == [] and sorted(labels[2]) == ["l:0:speaker90", "l:0:speaker91"] and sorted(labels[3]) == ["l:0:speaker90", "l:0:speaker91"]
           and states[4]["col1_display"] == "none" and states[2]["col1_display"] != "none"
           and len({s["gutter_widths"][0] for s in states}) == 1

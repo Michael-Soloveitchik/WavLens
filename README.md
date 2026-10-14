@@ -36,6 +36,26 @@ Click a speaker or an annotation name: keep its segments → keep the complement
 
 Any number of annotations and speakers: the lane block grows (`row_height`); the chevron beside a name opens that annotation's speaker column; drag a name (or an audio's pill) to reorder; colours are deterministic (Set1, pyannote's palette) or yours via `colors={speaker: css}` (per annotation: a dict of such dicts).
 
+![compare](docs/compare.png)
+
+Reference against hypothesis: `colors={"hypothesis": {"A": "#1e88e5", "B": "#f4511e"}}` keys the outer dict by annotation, the inner by speaker; `colors={speaker: css}` alone colours that speaker in every annotation.
+
+![complement](docs/complement.png)
+
+The complement of `speaker91` (second click on its label, dashed outline): only the parts where it is not speaking stay audible and visible. `solo=["!ref/speaker91"]` gives the same from Python.
+
+![mix](docs/mix.png)
+
+Three audios and the `mix` row, the mean of the selected ones at 1/m each. Muting one with its checkbox drops it from the mix instantly; the row disappears when fewer than two are selected.
+
+![functions](docs/functions.png)
+
+`function={"vad": vad, "energy": rms, "f0": pitch}`: every curve min-max scaled to 0..1, any length, hover for the name. Keys equal to an audio name bind a curve to that row only.
+
+![zoom](docs/zoom.png)
+
+Wheel zoom at 40 px/s on the spectrogram: the image is stretched, the ruler is recomputed, the playhead and lanes stay aligned. `zoom=40, time=10.2, view="fft"` reproduce it from Python.
+
 ## Inputs
 
 - Audio: path, `{"audio": path}`, `{"waveform": tensor, "sample_rate": sr}`, `(array_or_tensor, sr)` (what `torchaudio.load` returns), lists and `{name: ...}` dicts. Integers scaled, any torch device. `sample_rate=` is an optional target; mixed rates resample to the highest.
@@ -44,7 +64,7 @@ Any number of annotations and speakers: the lane block grows (`row_height`); the
 - Python control: `w.seek`, `w.play`, `w.pause`, `w.enabled`, `w.solo_("ref", "!ref/speaker91")`, `w.dim(...)`, all also as `show()` arguments.
 - Export: `w.save_html("run.html")` (self-contained, interactive, no kernel), `w.log_comet(experiment, step=epoch)`, `w.log_wandb("diarization", step=epoch)`.
 
-Full reference: `FUNCTIONALITIES.md`. Fixed findings from the bug hunts: `FIXED_BUGS.md`. Blueprint: `plan.md`. Examples: `examples/wavlens.ipynb`, one cell per form.
+Full reference: `FUNCTIONALITIES.md`. Fixed findings from the bug hunts: `FIXED_BUGS.md`. Blueprint: `plan.md`. Examples: `examples/wavlens.ipynb`, one cell per form. Hebrew documentation for Confluence, one page per notebook chapter with use cases: `confluence/`.
 
 ## Develop
 

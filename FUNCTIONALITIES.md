@@ -7,8 +7,9 @@ Complete reference of what `wavlens.show(...)` accepts and what the widget does.
 ```python
 wavlens.show(*items, audio=None, annotation=None, function=None, sample_rate=None,
            height=96, row_height=16, weights=None, interpolation="linear", colors=None,
-           colormap="magma", view="wave", legend="inline", step=0.01,
-           enabled=None, solo=None, dim=(), zoom=0.0, time=0.0, autoplay=False, threshold=0.5) -> WavLens
+           colormap="magma", view="wave", expanded=(), step=0.01,
+           enabled=None, solo=None, dim=(), zoom=0.0, time=0.0, autoplay=False, threshold=0.5,
+           fscale="mel", fmax=None, order=None) -> WavLens
 ```
 
 - Positional `*items`: any mix of audios and annotations, any order. Dispatch by type: pyannote objects, annotation files, annotation objects (section 3) are annotations; everything else is audio. A positional 2-D array is audio `(C, T)`; frame matrices must go through `annotation=` / `function=`. Anything unrecognized raises `TypeError`.
@@ -86,7 +87,7 @@ Mirror the `audio` form: dict ↔ dict with the same keys, list ↔ list of the 
 
 ## 8. Spectrogram
 
-`colormap=` any matplotlib name (validated). `fscale="mel"` (default) or `"linear"`; `fmax=` top of the axis in Hz (default Nyquist; 5000 is a good speech setting). numpy STFT: n_fft 512, hop 128, Hann, magnitude normalized by window gain, frames max-pooled into at most 4000 columns, computed in 1 M-sample chunks (bounded memory, every sample observed). dB range 80 below `max(peak, −60 dBFS)` so silence is dark. Frequency axis: mel-spaced rows (low band gets most of the height, each row = max over its bins) or linear (max-pooled when shrinking, bilinear when growing); high frequencies on top; column i centred at `(i + 0.5) / cols`. Encoded as JPEG q85 data URL, one per audio; the browser stretches it with the zoom. Needs matplotlib (+Pillow); without it the fft button shows nothing.
+`colormap=` any matplotlib name (validated). `fscale="mel"` (default) or `"linear"`; `fmax=` top of the axis in Hz (default Nyquist; 5000 is a good speech setting). numpy STFT: window ≈ 32 ms at any rate (`n_fft` = power of two nearest 0.032·sr: 512 @ 16 kHz, 2048 @ 48 kHz; `n_fft=` overrides), hop n_fft/4, Hann, magnitude normalized by window gain, frames max-pooled into at most 4000 columns by sample time (the image spans exactly the audio), computed in 1 M-sample chunks (bounded memory, every sample observed). dB range 80 below `max(peak, −60 dBFS)` so silence is dark. Frequency axis: mel-spaced rows (low band gets most of the height, each row = max over its bins) or linear (max-pooled when shrinking, bilinear when growing); high frequencies on top; column i centred at `(i + 0.5) / cols`. Encoded as JPEG q85 4:4:4 data URL, one per audio; the browser stretches it with the zoom and, when the view has fewer pixels than columns, box-resamples it through a canvas (no column skipping). `colormap=` any matplotlib name (case-insensitive) or Colormap object. Mix row: `mix_specs` holds the mix spectrogram per enabled set (all subsets precomputed for ≤ 3 audios, every set seen afterwards), `mix_mask` the set of the last one; with a kernel Python computes missing sets on toggle, without one (standalone export) the mix row shows a note for an unseen set. Needs matplotlib (+Pillow); without it the fft button shows nothing.
 
 ## 9. Layout and controls (browser)
 
@@ -115,7 +116,7 @@ Traits (synced): `audio_url, duration, functions, peaks, spectrograms, audio_nam
 
 Methods: `w.seek(t)`, `w.play()`, `w.pause()`, `w.solo_(*items)` (`"ref"`, `"ref/speaker90"`, `("ref", "speaker90")`; no args clears), `w.dim(*items)` (same keys; no args clears), `w.enabled = [...]`, `w.expanded = ["ref"]`, `w.groups` (current order).
 
-Arguments for initial state: `enabled=[bools]`, `solo="ref"` or list, `dim=[...]`, `zoom=px_per_second` (0 = fit), `time=seconds`, `autoplay=True` (browsers may block until a click), `view="fft"`, `legend="side"|"both"`, `step=seconds`.
+Arguments for initial state: `enabled=[bools]`, `solo="ref"` or list, `dim=[...]`, `zoom=px_per_second` (0 = fit), `time=seconds`, `autoplay=True` (browsers may block until a click), `view="fft"`, `expanded=True | [names]`, `order=[...]`, `fscale`, `fmax`, `step=seconds`.
 
 Validation: `view` is an enum; `height`, `row_height` > 0; `step` > 0; `zoom`, `time` finite ≥ 0; `enabled` length = number of audios; unknown annotation or speaker in `solo` / `dim` raises.
 
@@ -136,4 +137,4 @@ Validation: `view` is an enum; `height`, `row_height` > 0; `step` > 0; `zoom`, `
 
 ## 12. Files and tooling
 
-`wavlens/__init__.py` (library), `js/wavlens.js` → `npm run build` → `wavlens/wavlens.js` (bundle, wavesurfer 7 core + Timeline + Zoom, no network). `tests/test_weights.py` (numeric, 27 checks), `tests/run_harness.py` + `harness.html` (Playwright, 15 browser scenarios, screenshots in `tests/out/`). `examples/wavlens.ipynb` (one cell per form). After a rebuild restart the kernel (anywidget reads the bundle at import). `pip install -e ".[all]"`, `python -m build` for PyPI.
+`wavlens/__init__.py` (library), `js/wavlens.js` → `npm run build` → `wavlens/wavlens.js` (bundle, wavesurfer 7 core + Timeline + Zoom, no network). `tests/test_weights.py` (numeric, 32 checks), `tests/run_harness.py` + `harness.html` (Playwright, 15 browser scenarios, screenshots in `tests/out/`). `examples/wavlens.ipynb` (one cell per form). After a rebuild restart the kernel (anywidget reads the bundle at import). `pip install -e ".[all]"`, `python -m build` for PyPI.

@@ -9,6 +9,7 @@
 import base64
 import hashlib
 import io
+import math
 import json
 import warnings
 from collections import OrderedDict
@@ -583,18 +584,30 @@ def _mel_rows(db, sr, height, fmax, n_bins):
     return np.stack([db[lo:max(hi, lo + 1)].max(0) for lo, hi in zip(b[:-1], b[1:])])
 
 
-def _spectrogram(x, sr, cmap, height, fscale="mel", fmax=None, n_fft=512, max_cols=4000, dyn_range=80.0, floor_dbfs=-60.0):
+def _cmap(cmap):
+    """matplotlib colormap name (case-insensitive) or Colormap object -> (Colormap, key for the cache)."""
+    from matplotlib import colormaps
+    from matplotlib.colors import Colormap
+    if isinstance(cmap, Colormap):
+        return cmap, f"cmap:{cmap.name}:{id(cmap)}"
+    if isinstance(cmap, str):
+        name = next((k for k in colormaps if k.lower() == cmap.lower()), None)
+        if name is not None:
+            return colormaps[name], name
+    raise ValueError(f"unknown colormap {cmap!r}; any matplotlib name or Colormap object works, e.g. magma, viridis, gray_r")
+
+
+def _spectrogram(x, sr, cmap, height, fscale="mel", fmax=None, n_fft=None, max_cols=4000, dyn_range=80.0, floor_dbfs=-60.0):
     """Log-magnitude STFT as a JPEG data URL, `height` rows (frequency axis mel by default, or linear;
     high frequencies on top), <= max_cols columns. Every sample is observed: frames step n_fft/4 and
     are max-pooled into columns, computed in chunks so memory stays bounded. Column i is centred at
     (i + 0.5) / cols of the duration. The dB reference is max(peak, floor): silence stays dark."""
     try:
-        from matplotlib import colormaps, image
+        from matplotlib import image
         from PIL import Image
     except ImportError:
         return ""
-    if cmap not in colormaps:
-        raise ValueError(f"unknown colormap {cmap!r}; any matplotlib name works, e.g. magma, viridis, gray_r")
+    cmap, _ = _cmap(cmap)
     if fscale not in ("mel", "linear"):
         raise ValueError(f"fscale must be 'mel' or 'linear', got {fscale!r}")
     if fmax is not None and (isinstance(fmax, (bool, str)) or not isinstance(fmax, (int, float, np.number))):
@@ -602,13 +615,17 @@ def _spectrogram(x, sr, cmap, height, fscale="mel", fmax=None, n_fft=512, max_co
     fmax = sr / 2 if fmax is None else float(fmax)
     if not 0 < fmax <= sr / 2:
         raise ValueError(f"fmax must be in (0, {sr / 2:.0f}] Hz, got {fmax}")
+    if n_fft is None:  # ~32 ms window at any rate: 512 @ 16 kHz, 2048 @ 48 kHz (same Hz per bin on the mel rows)
+        n_fft = int(min(4096, max(256, 2 ** round(math.log2(0.032 * sr)))))
     hop = n_fft // 4
     win = np.hanning(n_fft).astype(np.float32)
     gain = win.sum() / 2  # |rfft| of a full-scale sine == gain
     n = len(x)
     n_frames = -(-n // hop)
     cols = min(max_cols, n_frames)
-    col_of_frame = (np.arange(n_frames) * cols) // n_frames
+    # frame f is centred at (f + 0.5) * hop samples; column i covers [i, i + 1) * n / cols samples, so the
+    # image spans exactly the audio (no n_frames * hop overhang on short clips)
+    col_of_frame = np.minimum(((np.arange(n_frames) * hop + hop // 2) * cols) // n, cols - 1)
     out = np.zeros((n_fft // 2 + 1, cols), np.float32)
     xp = np.pad(x, (n_fft // 2 - hop // 2, n_fft))  # frame f is centred at (f + 0.5) * hop, like its column
     frames_per_chunk = (1 << 20) // hop
@@ -631,8 +648,23 @@ def _spectrogram(x, sr, cmap, height, fscale="mel", fmax=None, n_fft=512, max_co
     else:
         db = np.asarray(Image.fromarray(db, mode="F").resize((cols, height), Image.BILINEAR))
     buf = io.BytesIO()
-    image.imsave(buf, colormaps[cmap](db[::-1])[..., :3], format="jpeg", pil_kwargs={"quality": 85})
+    image.imsave(buf, cmap(db[::-1])[..., :3], format="jpeg", pil_kwargs={"quality": 85, "subsampling": 0})  # 4:4:4: thin lines keep their colour
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
+
+
+def specs_possible():
+    try:
+        import matplotlib, PIL  # noqa: F401
+        return True
+    except ImportError:
+        return False
+
+
+def _mix_spec(on, sr, cmap, height, fscale, fmax):
+    """Spectrogram of the mean of the selected audios (what is played), cached by content."""
+    mix = sum(on) / len(on)
+    _, ck = _cmap(cmap)
+    return _cache.get_or(_digest(_digest(mix, sr), ck, height, fscale, fmax), lambda: _spectrogram(mix, sr, cmap, height, fscale, fmax))
 
 
 # ----------------------------------------------------------------------------- widget
@@ -647,6 +679,8 @@ class WavLens(anywidget.AnyWidget):
     functions = traitlets.List([]).tag(sync=True)       # [{"name", "color", "row", "x", "y"}, ...]; row = audio index or -1
     peaks = traitlets.List([]).tag(sync=True)           # per audio (+ the mix row when >= 2 audios): abs-max bins
     spectrograms = traitlets.List([]).tag(sync=True)    # per audio (+ mix): JPEG data URL, stretched to the row
+    mix_mask = traitlets.List([]).tag(sync=True)        # the enabled set the last spectrogram (the mix) was computed for
+    mix_specs = traitlets.Dict({}).tag(sync=True)       # {"1101": url}: mix spectrograms per enabled set (all subsets for <= 3 audios, then every set seen)
     audio_names = traitlets.List([]).tag(sync=True)
     channels = traitlets.Int(1).tag(sync=True)
     weighted = traitlets.Bool(False).tag(sync=True)     # weights baked in -> gains 1/0; else equal 1/n live
@@ -744,10 +778,15 @@ class WavLens(anywidget.AnyWidget):
             return
         xs, sr, cmap, height, fscale, fmax = self._mix
         on = [x for x, e in zip(xs, self.enabled) if e]
-        mix = sum(on) / len(on) if on else np.zeros_like(xs[0])  # 1/m over the m selected audios
-        spec = _cache.get_or(_digest(_digest(mix, sr), cmap, height, fscale, fmax), lambda: _spectrogram(mix, sr, cmap, height, fscale, fmax))
-        if self.spectrograms and self.spectrograms[-1] != spec:
+        if len(on) < 2:
+            return  # no mix row shown
+        key = "".join("1" if e else "0" for e in self.enabled)
+        spec = self.mix_specs.get(key) or _mix_spec(on, sr, cmap, height, fscale, fmax)
+        if key not in self.mix_specs:
+            self.mix_specs = {**self.mix_specs, key: spec}  # exports made later carry every subset seen
+        if not self.spectrograms or self.spectrograms[-1] != spec or self.mix_mask != list(self.enabled):
             self.spectrograms = self.spectrograms[:len(xs)] + [spec]
+            self.mix_mask = list(self.enabled)
 
     def seek(self, t):
         self.current_time = float(t)
@@ -924,9 +963,23 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
     keys = [_digest(x, sr) for x in rows]
     audio_url = _cache.get_or(_digest(*keys[:len(xs)], "wav"), wav)
     peaks = [_cache.get_or(k + "peaks", lambda x=x: _peaks(x)) for k, x in zip(keys, rows)]
-    specs = [_cache.get_or(_digest(k, colormap, height, fscale, fmax), lambda x=x: _spectrogram(x, sr, colormap, height, fscale, fmax)) for k, x in zip(keys, rows)]
+    _, ck = _cmap(colormap) if specs_possible() else (None, str(colormap))
+    specs = [_cache.get_or(_digest(k, ck, height, fscale, fmax), lambda x=x: _spectrogram(x, sr, colormap, height, fscale, fmax)) for k, x in zip(keys[:len(xs)], xs)]
+    en = [bool(e) for e in enabled] if enabled is not None else [True] * len(loaded)
+    mix_specs, mix_mask = {}, []
+    if len(xs) >= 2 and specs[0]:
+        masks = [[bool(b & (1 << i)) for i in range(len(xs))] for b in range(1 << len(xs))] if len(xs) <= 3 else []
+        if len(en) == len(xs) and sum(en) >= 2 and en not in masks:
+            masks.append(en)
+        if all(en) is False and [True] * len(xs) not in masks:
+            masks.append([True] * len(xs))
+        for m in masks:
+            if sum(m) >= 2:
+                mix_specs["".join("1" if b else "0" for b in m)] = _mix_spec([x for x, b in zip(xs, m) if b], sr, colormap, height, fscale, fmax)
+        mix_mask = en if len(en) == len(xs) and sum(en) >= 2 else [True] * len(xs)
+        specs = specs + [mix_specs["".join("1" if b else "0" for b in mix_mask)]]
     w = WavLens(
-        audio_url=audio_url, duration=duration, peaks=peaks, spectrograms=specs, audio_names=names,
+        audio_url=audio_url, duration=duration, peaks=peaks, spectrograms=specs, audio_names=names, mix_specs=mix_specs, mix_mask=mix_mask,
         channels=len(loaded), weighted=weights is not None,
         groups=_groups([(None, a) for a in pos_ann] + _named(annotation, _is_ann), colors, form(annotation, pos_ann), duration, threshold),
         functions=_functions(_bind_functions(function, names), duration, interpolation),

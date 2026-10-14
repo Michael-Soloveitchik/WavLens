@@ -117,6 +117,13 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | R16 | Calmer controls: 9 px hollow checkbox with a thin green check, no unicode glyphs; expander is a small SVG chevron (`button.exp`, rotates when open) | ✅ |
 | 47 | `colors={speaker: css}` with `annotation={"name": ...}` was matched against annotation names, so nothing applied and the Set1 defaults (red/blue) stayed | colors read by shape: css-valued dict or css list = speaker map for every annotation; dict/list-valued = per annotation | ✅ |
 | 48 | `{speaker: [(start, end), ...]}` was not an accepted annotation form | one annotation with labels from the keys; a dict whose values carry labels (3-tuples, records, speaker dicts, objects, paths) stays a dict of annotations | ✅ |
+| S6 | Mix spectrogram never updated without a kernel (standalone HTML, Comet, W&B): only Python recomputed it | `mix_specs` trait: every subset precomputed for ≤ 3 audios, every subset seen afterwards; `mix_mask` names the set the last spectrogram is for; the browser picks by the enabled set and otherwise shows a note on the mix row; initial `enabled=` now gives the mix of that set | ✅ |
+| S7 | `n_fft` fixed at 512 at every rate: 94 Hz bins at 48 kHz smeared a 100 Hz tone over 8 rows | window ≈ 32 ms at any rate (512 @ 16 k, 2048 @ 48 k), `n_fft=` still overridable | ✅ |
+| S8 | Spectrogram columns (≤ 4000) sampled by the browser when the view had fewer pixels: 30 equal impulses rendered at 0.72–0.99 | below 1 column per pixel the image is box-resampled through a bitmap canvas (`canvas.specfit`), the img is back above it; redone on zoom and resize | ✅ |
+| S9 | JPEG 4:2:0 chroma subsampling shifted the colour of 1-row tones | 4:4:4 (`subsampling=0`) | ✅ |
+| S10 | Image spanned `n_frames·hop` samples, up to 2.4 % longer than short clips | frames assigned to columns by sample time, span exact | ✅ |
+| S11 | `colormap=` rejected Colormap objects (unhashable) and `"Magma"` | objects accepted, names case-insensitive | ✅ |
+| B35 | First click inside the widget was swallowed: focusing the root on pointerdown could scroll the page under the pointer, so pointerup landed elsewhere | `focus({preventScroll: true})` | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Third pass (expander, drag, mix row, mel axis)
