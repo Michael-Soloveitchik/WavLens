@@ -200,8 +200,8 @@ function render({ model, el: host }) {
   const maskOf = (key, mode) => (mode === "inv" ? complement(segsOf(key)) : segsOf(key));
   const soloState = () => [...solos].map(([k, m]) => (m === "inv" ? "!" + k : k));
   // Schedule the mask gain from the current position: 1 inside kept segments, 0 outside, 5 ms ramps.
-  const scheduleMask = () => {
-    const g = maskGain.gain, now = ctx.currentTime, t0 = ws.getCurrentTime();
+  const scheduleMask = (at) => {  // `at`: the position to schedule from (defaults to the player's current time)
+    const g = maskGain.gain, now = ctx.currentTime, t0 = at != null ? at : ws.getCurrentTime();
     g.cancelScheduledValues(now);
     if (!keep) { g.setValueAtTime(1, now); return; }
     g.setValueAtTime(inKeep(t0) ? 1 : 0, now);
@@ -210,6 +210,8 @@ function render({ model, el: host }) {
       if (e > t0) g.setTargetAtTime(0, now + (e - t0), FADE / 3);
     }
   };
+  ws.on("play", () => scheduleMask());                               // the automation is relative to the audio clock:
+  ws.on("seeking", () => setTimeout(() => scheduleMask(), 0));       // re-schedule on every start and seek
   const applySolo = () => {
     keep = null;
     for (const [k, mode] of solos) keep = keep ? intersect(keep, maskOf(k, mode)) : maskOf(k, mode);
@@ -463,7 +465,7 @@ function render({ model, el: host }) {
     if (act) { e.preventDefault(); e.stopPropagation(); act(); }
   });
   let lastClick = 0;
-  ws.on("interaction", () => { const now = performance.now(); if (now - lastClick > 300) safePlay(); lastClick = now; }); // click = seek + play; a double-click does not restart
+  ws.on("interaction", () => { lastClick = performance.now(); });  // click = seek only; play/pause stays as it was
   let hold;  // while wheel-zooming, keep the view under the pointer even during playback
   wsHost.addEventListener("wheel", () => {
     ws.options.autoScroll = false;
@@ -489,6 +491,7 @@ function render({ model, el: host }) {
       const n = nextStart(t);
       if (n == null) { ws.pause(); ws.setTime(keep[keep.length - 1][1]); return; }
       ws.setTime(n);
+      scheduleMask(n);  // from the jump target, not from the gap we left
       return;
     }
     timeOut.textContent = `${t.toFixed(3)} s`;

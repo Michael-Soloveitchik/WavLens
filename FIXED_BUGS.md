@@ -112,6 +112,8 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | B31 | Drag listeners survived pointer leaving the window; no pointerId filter, no pointercancel | pointerId filtered, pointercancel and window blur end the drag | ✅ |
 | B32 | `order` from the browser side unchecked for range (crash in `withMix`) | indices range-checked | ✅ |
 | B33 | Unknown names in `expanded` written back; drag marker shown when a single row cannot move | unknown names dropped on save; no drag with fewer than two rows | ✅ |
+| B34 | With a mask active, no sound after the playhead skipped a gap: the mask automation was computed once at solo time (the `play` / `seeking` re-scheduling hooks had been lost in a rewrite) and, when re-armed from the `seeking` event, used the pre-jump position | re-scheduled on every play and seek (after the player takes the new position) and explicitly from the jump target | ✅ |
+| R15 | Clicking the rows started playback; now click = seek only, paused stays paused | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Third pass (expander, drag, mix row, mel axis)

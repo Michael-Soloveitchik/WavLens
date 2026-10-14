@@ -102,7 +102,7 @@ Everything inside the scroll wrapper is sized in percent of the duration: zoom i
 
 Interactions:
 - Wheel over the audio/lanes: zoom around the pointer (0.25 scale per notch, max 2000 px/s); auto-scroll is paused for 400 ms around wheel events so playback does not fight the zoom. Horizontal scroll pans.
-- Click anywhere in the rows: seek and play. Space: play/pause. ← / →: nudge by `step`. Keys act only when the widget has focus (any click inside focuses it) and never reach the document.
+- Click anywhere in the rows: seek (playback state unchanged: paused stays paused). Space: play/pause. ← / →: nudge by `step`. Keys act only when the widget has focus (any click inside focuses it) and never reach the document.
 - `☑` toggles: mute via per-audio WebAudio gain nodes (10 ms ramp), playback continues.
 - Click on a name cycles three states: neutral → keep its segments (solid red outline) → keep the complement, the unlabelled parts (dashed red outline) → neutral. An annotation name means the union of all its speakers; a legend entry one speaker. Several active names intersect. Playback keeps only the result: outside it the audio is silenced (gain automation, 5 ms ramps) and the playhead skips (jumps to the next kept segment, pauses at the end of the last). The view keeps its time axis; excluded parts are whited out at 92 %. Python: `solo=["ref", "!ref/speaker91"]`, `w.solo_(...)`, trait `solo` holds the keys with a `!` prefix for the complement. Dimming (`w.dim(...)`) is Python-only.
 - A muted audio row (checkbox off) is whited out the same way, like a cut.

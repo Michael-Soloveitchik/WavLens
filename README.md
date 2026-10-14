@@ -16,7 +16,7 @@ Runtime dependencies (all installed automatically): anywidget, ipywidgets, trait
 
 ![overview](docs/overview.png)
 
-Two audios (`clean`, `noisy`) and the framed `mix` row (the mean of the selected audios, what you hear), a reference and a hypothesis annotation, an RMS curve on every row, the `▸` expander opening one annotation's speaker column. Wheel = zoom around the pointer, click = seek and play, ← / → = 10 ms, space = play/pause. Every button is labelled with what its next click does.
+Two audios (`clean`, `noisy`) and the framed `mix` row (the mean of the selected audios, what you hear), a reference and a hypothesis annotation, an RMS curve on every row, the `▸` expander opening one annotation's speaker column. Wheel = zoom around the pointer, click = seek, space = play/pause, ← / → = 10 ms. Every button is labelled with what its next click does.
 
 ```python
 wavlens.show(audio={"clean": (x, sr), "noisy": (y, sr)},
