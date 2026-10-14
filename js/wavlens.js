@@ -68,7 +68,7 @@ function union(segs) {
 function render({ model, el: host }) {
   const H = model.get("height"), N = model.get("channels") || 1, D = model.get("duration"), RH = model.get("row_height") || 16;
   let order = (model.get("order") || []).slice();  // display order of the audio rows (original indices)
-  if (order.length !== N || new Set(order).size !== N) order = [...Array(N).keys()];
+  if (order.length !== N || new Set(order).size !== N || !order.every((i) => i >= 0 && i < N)) order = [...Array(N).keys()];
   const nOn = () => enabled.filter(Boolean).length;
   const R = () => N + (nOn() >= 2 ? 1 : 0);  // audio rows drawn: the inputs plus, while >= 2 are selected, the mix row
   const subs = [], on = (ev, cb) => { model.on(ev, cb); subs.push([ev, cb]); };  // removed on destroy
@@ -155,7 +155,7 @@ function render({ model, el: host }) {
   allBtn.onclick = () => { const on = !enabled.every(Boolean); setEnabled(enabled.map(() => on)); };
   on("change:weighted", applyEnabled);
   on("change:enabled", () => { enabled = (model.get("enabled") || []).slice(0, N); while (enabled.length < N) enabled.push(true); draw(); renderMix(); });
-  on("change:order", () => { const o = (model.get("order") || []).slice(); if (o.length === N && new Set(o).size === N) { order = o; draw(); renderMix(); } });
+  on("change:order", () => { const o = (model.get("order") || []).slice(); if (o.length === N && new Set(o).size === N && o.every((i) => i >= 0 && i < N)) { order = o; draw(); renderMix(); } });
   on("change:spectrograms", () => draw());
 
   // ---- solo: silence outside the kept segments (masked buffer) and skip the gaps while playing
@@ -337,7 +337,12 @@ function render({ model, el: host }) {
       const open = expanded.has(g.name);
       const tog = el("button", `position:absolute;left:2px;top:${y(0) - 1}px;width:13px;height:13px;padding:0;border:0;background:none;color:#777;cursor:pointer;font:11px/13px sans-serif;`, open ? "▾" : "▸");
       tog.title = open ? "hide this annotation's speakers" : "show this annotation's speakers";
-      tog.onclick = () => { open ? expanded.delete(g.name) : expanded.add(g.name); model.set("expanded", [...expanded]); model.save_changes(); draw(); };
+      tog.onclick = () => {
+        open ? expanded.delete(g.name) : expanded.add(g.name);
+        const known = new Set(groups.map((x) => x.name));
+        for (const n of [...expanded]) if (!known.has(n)) expanded.delete(n);
+        model.set("expanded", [...expanded]); model.save_changes(); draw();
+      };
       col0.appendChild(tog);
       const nameEl = text(g.name, y(0), "#555");
       nameEl.style.left = "16px";
@@ -363,8 +368,12 @@ function render({ model, el: host }) {
   const dragRows = (d, from, bounds, commit) => {
     d.style.touchAction = "none";
     d.onpointerdown = (e0) => {
+      delete d.dataset.dragged;
+      if (bounds().length - 1 < 2) return;  // a single row cannot move
+      const id = e0.pointerId;
       let y0 = e0.clientY, moved = false, target = from;
       const move = (e) => {
+        if (e.pointerId !== id) return;
         if (!moved && Math.abs(e.clientY - y0) < 5) return;
         moved = true;
         d.style.opacity = ".4";
@@ -374,18 +383,24 @@ function render({ model, el: host }) {
         marker.style.top = `${b[Math.min(target, n)]}px`;
         marker.style.display = "";
       };
-      const up = () => {
+      const end = (e) => {
+        if (e && e.pointerId != null && e.pointerId !== id) return;
         document.removeEventListener("pointermove", move);
-        document.removeEventListener("pointerup", up);
+        document.removeEventListener("pointerup", end);
+        document.removeEventListener("pointercancel", end);
+        window.removeEventListener("blur", end);
         marker.style.display = "none";
         d.style.opacity = "";
-        if (!moved) return;
-        d.dataset.dragged = "1";  // swallow the click that follows a drag
+        if (!moved || !e || e.type !== "pointerup") return;
         const dest = target > from ? target - 1 : target;
-        if (dest !== from) commit(from, dest);
+        if (dest === from) return;
+        d.dataset.dragged = "1";  // swallow only the click that follows a real reorder
+        commit(from, dest);
       };
       document.addEventListener("pointermove", move);
-      document.addEventListener("pointerup", up);
+      document.addEventListener("pointerup", end);
+      document.addEventListener("pointercancel", end);
+      window.addEventListener("blur", end);
     };
   };
   const draggable = (d, gi) => dragRows(d, gi, () => {  // annotation groups: boundaries at group tops
@@ -396,8 +411,9 @@ function render({ model, el: host }) {
     const groups = model.get("groups") || [], perm = groups.map((_, k) => k);
     perm.splice(dest, 0, perm.splice(from, 1)[0]);
     const remap = (key) => { const [kind, i, ...rest] = key.split(":"); return [kind, perm.indexOf(+i), ...rest].join(":"); };
-    for (const [k, m] of [...solos]) { solos.delete(k); solos.set(remap(k), m); }
-    for (const k of [...dimmed]) { dimmed.delete(k); dimmed.add(remap(k)); }
+    const newSolos = new Map([...solos].map(([k, m]) => [remap(k), m])), newDim = new Set([...dimmed].map(remap));  // from snapshots: no collisions
+    solos.clear(); for (const [k, m] of newSolos) solos.set(k, m);
+    dimmed.clear(); for (const k of newDim) dimmed.add(k);
     model.set("groups", perm.map((k) => groups[k]));
     model.set("solo", soloState());
     model.set("dimmed", [...dimmed]);
