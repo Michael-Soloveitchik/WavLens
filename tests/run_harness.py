@@ -966,6 +966,9 @@ def audio_drag_summary(a0: dict, mid: dict | None, a1: dict, muted: dict, unmute
         "mute_quiet_after_drag": {"enabled": muted["enabled"], "mute_tops": muted["mute_tops"], "waveform_canvases": muted["waveform_canvases"],
                                   "mix_label": len(muted["mix_label"])},
         "unmute": {"enabled": unmuted["enabled"], "mute_tops": unmuted["mute_tops"], "waveform_canvases": unmuted["waveform_canvases"]},
+        # Column entries must still sit on their lane rows after the mix row disappears / reappears.
+        "label_geometry_after_mute": geometry_summary(muted, fixture["groups"], fixture.get("row_height", 16)),
+        "label_geometry_after_unmute": geometry_summary(unmuted, fixture["groups"], fixture.get("row_height", 16)),
         "ok": (a0["order"] in ([], [0, 1])) and a1["order"] == [1, 0] and by_y(a1) == ["quiet", "clean"] and a1["enabled"] == [True, True]
               and mid is not None and mid["display"] != "none"
               and muted["enabled"] == [True, False] and muted["mute_tops"] == [{"row": "1", "top": "0px"}] and muted["waveform_canvases"] == N

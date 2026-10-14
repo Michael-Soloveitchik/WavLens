@@ -171,7 +171,16 @@ function render({ model, el: host }) {
     return out;
   };
   let mixTimer;
-  const renderMix = () => { if (!orig) return; clearTimeout(mixTimer); mixTimer = setTimeout(() => { ws.decodedData = withMix(orig); ws.renderer.render(ws.decodedData); }, 30); };
+  let laneTopDrawn = -1;  // lanes.offsetTop used by the last draw(); the columns are re-placed when the rows move
+  const renderMix = () => {
+    if (!orig) return;
+    clearTimeout(mixTimer);
+    mixTimer = setTimeout(() => {
+      ws.decodedData = withMix(orig);
+      ws.renderer.render(ws.decodedData);
+      if (lanes.offsetTop !== laneTopDrawn) draw();  // the row count changed: re-measure after the re-render
+    }, 30);
+  };
   const segsOf = (key) => {
     const [kind, gi, lab] = key.split(":"), g = (model.get("groups") || [])[+gi] || { segments: [] };
     return union(g.segments.filter((s) => kind === "g" || s.label === lab).map((s) => [s.start, s.end]));
@@ -306,6 +315,7 @@ function render({ model, el: host }) {
     const nrows = groups.reduce((n, g) => n + g.rows.length, 0);
     lanes.style.height = `${nrows * RH}px`;
     const laneTop = lanes.offsetTop;  // measured: wherever the timeline really ends
+    laneTopDrawn = laneTop;
     let top = 0;
     groups.forEach((g, gi) => {
       const shared = fns.filter((f) => f.row === -1 || f.row == null);

@@ -106,6 +106,7 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | R12 | Audio rows are reorderable by dragging the checkbox pill; `order` trait / argument (permutation, validated) | ✅ |
 | R13 | Mix row shown only while at least two audios are selected; rows, heights and toggles follow live | ✅ |
 | R14 | No text on the segments; speaker names only in the expander column (and the hover title) | ✅ |
+| B28 | Column entries placed one audio row off after the mix row appeared/disappeared (lanes measured before wavesurfer re-rendered) | columns re-placed after the re-render when the lanes moved | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Third pass (expander, drag, mix row, mel axis)
