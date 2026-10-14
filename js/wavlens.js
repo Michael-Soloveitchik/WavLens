@@ -266,7 +266,7 @@ function render({ model, el: host }) {
     col0.innerHTML = "";
     col1.innerHTML = "";
     lanes.innerHTML = "";
-    overlay.querySelectorAll(".fn").forEach((d) => d.remove());
+    overlay.querySelectorAll(".fn, .mixframe").forEach((d) => d.remove());
     spec.innerHTML = "";
     toggles.length = 0;
     segDivs.length = 0;
@@ -283,7 +283,9 @@ function render({ model, el: host }) {
         col0.appendChild(t);
       } else {  // mix row: not selectable, framed in blue
         col0.appendChild(el("div", `position:absolute;left:4px;top:${i * H + 3}px;font:600 10px sans-serif;color:#1e88e5;padding:1px 7px;border:1px solid #1e88e5;border-radius:9px;line-height:14px;`, "mix"));
-        overlay.appendChild(el("div", `position:absolute;left:0;width:100%;top:${i * H}px;height:${H}px;box-sizing:border-box;border-top:1.5px solid #1e88e5;border-bottom:1.5px solid #1e88e5;background:rgba(30,136,229,.04);`));
+        const fr = el("div", `position:absolute;left:0;width:100%;top:${i * H}px;height:${H}px;box-sizing:border-box;border-top:1.5px solid #1e88e5;border-bottom:1.5px solid #1e88e5;background:rgba(30,136,229,.04);`);
+        fr.className = "mixframe";
+        overlay.appendChild(fr);
       }
       const own = fns.filter((f) => f.row === i || f.row === -1 || f.row == null);
       if (own.length) overlay.appendChild(lines(own, i * H, H));
