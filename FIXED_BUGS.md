@@ -128,6 +128,7 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | B37 | After a masked end before the file end, play could not resume (closed interval kept the end "inside"; 20 ms blip at full level per press) | half-open segments; play from the masked end wraps to the first kept segment with the mask armed synchronously | ✅ |
 | B38 | Seek past the last kept segment while playing left readout and cursor at the seek target | pause writes the clamp to the readout and Python; paused seeks past the end are clamped | ✅ |
 | B39 | Play from inside a gap armed the mask one task late | mask scheduled synchronously from the jump target in the play handler | ✅ |
+| S12 | Pressing FFT at fit view showed the raw column-sampled image: the resample ran only on zoom/resize, and the draw-time pass measured 0 px while the layer was hidden | the resample is scheduled when the FFT layer is switched on | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Third pass (expander, drag, mix row, mel axis)
