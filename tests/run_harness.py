@@ -666,6 +666,30 @@ def main() -> None:
             page8.mouse.up()
             page8.wait_for_timeout(400)
             g2 = page8.evaluate(JS_STATE)
+            # (a) Collision-safe remap: solo ["g:0","g:2"] (set from Python), drag group 0 to the bottom -> ["g:2","g:1"], both outlined.
+            page8.evaluate("window.wavlensModel.set('solo', ['g:0', 'g:2'])")
+            page8.wait_for_timeout(300)
+            g3 = page8.evaluate(JS_STATE)
+            top_name = next(n for n in g3["name_divs"] if n["key"] == "g:0")
+            last_name = next(n for n in g3["name_divs"] if n["key"] == "g:2")
+            page8.mouse.move(top_name["x"] + 5, top_name["y"] + top_name["h"] / 2)
+            page8.mouse.down()
+            page8.mouse.move(top_name["x"] + 5, last_name["y"] + 40, steps=12)   # below the last group's band
+            page8.wait_for_timeout(100)
+            page8.mouse.up()
+            page8.wait_for_timeout(400)
+            g4 = page8.evaluate(JS_STATE)
+            # (b) No-op drag (+12 px, released inside the same band) must not swallow the next click: the mask cycles.
+            tgt = next(n for n in g4["name_divs"] if n["key"] == "g:2")
+            page8.mouse.move(tgt["x"] + 5, tgt["y"] + tgt["h"] / 2)
+            page8.mouse.down()
+            page8.mouse.move(tgt["x"] + 5, tgt["y"] + tgt["h"] / 2 + 12, steps=6)
+            page8.mouse.up()
+            page8.wait_for_timeout(300)
+            g5 = page8.evaluate(JS_STATE)
+            page8.locator('#widget div[data-key="g:2"]').click()
+            page8.wait_for_timeout(300)
+            g6 = page8.evaluate(JS_STATE)
 
             # 17. Two views of one model: play in A, B follows current_time; pause in A -> both not playing.
             page7 = browser.new_page(viewport={"width": 1100, "height": 900})
@@ -831,6 +855,18 @@ def main() -> None:
                 "ok": len({s["gutter_widths"][0] for s in l_states}) == 1 and [s["col1_display"] for s in l_states] == ["none", "block", "none"],
             },
             "drag_reorder": drag_summary(g0, g_mid, g1, g2),
+            "drag_remap_and_noop": {
+                "before": {"group_names": g3["group_names"], "solo": g3["solo"], "outlined": sorted(n["key"] for n in g3["name_labels"] if n["outline"])},
+                "after_group0_to_bottom": {"group_names": g4["group_names"], "solo": g4["solo"],
+                                           "outlined": sorted(n["key"] for n in g4["name_labels"] if n["outline"]),
+                                           "outlined_names": sorted(n["text"] for n in g4["name_divs"] if n["outline"])},
+                "after_noop_drag": {"group_names": g5["group_names"], "solo": g5["solo"]},
+                "after_click_on_g2": {"solo": g6["solo"], "outline_g2": label_of(g6, "g:2")["outline"]},
+                "ok": sorted(g3["solo"]) == ["g:0", "g:2"] and g4["group_names"] == [g3["group_names"][1], g3["group_names"][2], g3["group_names"][0]]
+                      and sorted(g4["solo"]) == ["g:1", "g:2"] and sorted(n["key"] for n in g4["name_labels"] if n["outline"]) == ["g:1", "g:2"]
+                      and g5["group_names"] == g4["group_names"] and g5["solo"] == g4["solo"]
+                      and sorted(g6["solo"]) == ["!g:2", "g:1"] and "dashed" in (label_of(g6, "g:2")["outline"] or ""),
+            },
             "dim_python": {
                 "set": {"label_opacity": label_of(dim_on, "l:0:speaker90")["opacity"], "seg_opacity_speaker90": seg_opacity(dim_on, "0", "speaker90"),
                         "seg_opacity_speaker91": seg_opacity(dim_on, "0", "speaker91")},
