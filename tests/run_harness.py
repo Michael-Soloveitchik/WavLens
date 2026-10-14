@@ -1106,15 +1106,17 @@ def mix_row_summary(before: dict, muted: dict, unmuted: dict, fixture: dict) -> 
         "unmuted": {"waveform_canvases": unmuted["waveform_canvases"], "mix_label": len(unmuted["mix_label"]), "mixframes": unmuted["mixframes"],
                     "overlay_height": unmuted["overlay_height"]},
         "canvases_rerendered_within_200ms": bool(muted["channel_marks"]) and all(c["marked"] == 0 for c in muted["channel_marks"]),
-        "ok": before["peaks_len"] == R and before["spectrograms_len"] == R and before["waveform_canvases"] == R
+        "channel_rows_before": len(before["channel_heights"]), "canvases_per_row": [c["canvases"] for c in before["channel_marks"]],
+        # Row count = channel containers (wavesurfer may split one row into several canvases).
+        "ok": before["peaks_len"] == R and before["spectrograms_len"] == R and len(before["channel_heights"]) == R
               and len(before["mix_label"]) == 1 and before["mixframes"] == 1 and "mix" not in before["buttons"]
               and before["overlay_height"] == R * H and before["spec_height"] == R * H
               and audio_gains(before)[:N] == [round(1 / N, 3)] * N
               and (audio_gains(muted)[:N] == [1.0, 0.0] or muted["gain_targets_tail"] == [1, 0])
               and (audio_gains(unmuted)[:N] == [0.5, 0.5] or unmuted["gain_targets_tail"] == [0.5, 0.5])
               and muted["enabled"] == [True, False]
-              and muted["waveform_canvases"] == N and muted["overlay_height"] == N * H and len(muted["mix_label"]) == 0
-              and unmuted["waveform_canvases"] == R and len(unmuted["mix_label"]) == 1
+              and len(muted["channel_heights"]) == N and muted["overlay_height"] == N * H and len(muted["mix_label"]) == 0
+              and len(unmuted["channel_heights"]) == R and len(unmuted["mix_label"]) == 1
               and bool(muted["channel_marks"]) and all(c["marked"] == 0 for c in muted["channel_marks"]),
     }
 
@@ -1135,8 +1137,8 @@ def audio_drag_summary(a0: dict, mid: dict | None, a1: dict, muted: dict, unmute
         "label_geometry_after_unmute": geometry_summary(unmuted, fixture["groups"], fixture.get("row_height", 16)),
         "ok": (a0["order"] in ([], [0, 1])) and a1["order"] == [1, 0] and by_y(a1) == ["quiet", "clean"] and a1["enabled"] == [True, True]
               and mid is not None and mid["display"] != "none"
-              and muted["enabled"] == [True, False] and muted["mute_tops"] == [{"row": "1", "top": "0px"}] and muted["waveform_canvases"] == N
-              and unmuted["enabled"] == [True, True] and unmuted["mute_tops"] == [] and unmuted["waveform_canvases"] == N + 1,
+              and muted["enabled"] == [True, False] and muted["mute_tops"] == [{"row": "1", "top": "0px"}] and len(muted["channel_heights"]) == N
+              and unmuted["enabled"] == [True, True] and unmuted["mute_tops"] == [] and len(unmuted["channel_heights"]) == N + 1,
     }
 
 

@@ -498,6 +498,7 @@ function render({ model, el: host }) {
     fft.textContent = showSpec ? "WAVE" : "FFT";
     for (const c of wrapper.children) if (/canvases|progress/.test(c.getAttribute("part") || "")) c.style.display = showSpec ? "none" : "";
     spec.style.display = showSpec ? "" : "none";
+    if (showSpec) fitSpecsSoon();  // the layer measured 0 px while hidden: resample now that it is visible
   };
   fft.onclick = () => { showSpec = !showSpec; applyView(); };
   const nudge = (d) => ws.setTime(Math.min(D, Math.max(0, ws.getCurrentTime() + d)));
