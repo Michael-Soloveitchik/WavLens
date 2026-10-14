@@ -51,7 +51,11 @@ JS_STATE = """
   const waveParts = kids.filter((c) => /canvases|progress/.test(c.getAttribute('part') || ''));
   const canvases = deep('[part="canvases"] canvas');
   // Spectrogram rows are Python-rendered <img> data URLs stretched to the wrapper (older builds: a plugin <canvas>).
-  const specCanvas = specHost ? specHost.querySelector('canvas, img') : null;
+  // Visible spectrogram element: canvas.specfit at fit view (img hidden) or the img itself when zoomed in.
+  const specFitVisible = specHost ? [...specHost.querySelectorAll('canvas.specfit')].filter((c) => c.style.display !== 'none') : [];
+  const specImgVisible = specHost ? [...specHost.querySelectorAll('img')].filter((i) => i.style.visibility !== 'hidden') : [];
+  const specCanvas = specFitVisible[0] || specImgVisible[0] || (specHost ? specHost.querySelector('canvas, img') : null);
+  const playBtn = document.querySelectorAll('#widget button')[1];
   const specReady = specHost ? [...specHost.querySelectorAll('canvas, img')].filter((e) => e.tagName === 'CANVAS' || (e.complete && e.naturalWidth > 0)).length : 0;
   const sw = (e) => (e ? e.scrollWidth : null);
   // Left gutter (light DOM, never scrolls): wave row = root's 3rd child; column 0 = ☑ toggles + annotation
@@ -100,6 +104,11 @@ JS_STATE = """
     spec_visible: !!specHost && specHost.style.display !== 'none' && specHost.offsetHeight > 0,
     spec_canvases: specReady,
     spec_kind: specCanvas ? specCanvas.tagName.toLowerCase() : null,
+    specfit_visible: specFitVisible.length, specfit_total: specHost ? specHost.querySelectorAll('canvas.specfit').length : 0,
+    specimg_visible: specImgVisible.length, specimg_total: specHost ? specHost.querySelectorAll('img.specimg').length : 0,
+    mixspec: specHost ? specHost.querySelectorAll('.mixspec').length : 0, specnote: specHost ? specHost.querySelectorAll('.specnote').length : 0,
+    spec_img_natural_width: specHost && specHost.querySelector('img.specimg') ? specHost.querySelector('img.specimg').naturalWidth : null,
+    play_disabled: playBtn ? playBtn.disabled : null, play_title: playBtn ? playBtn.title : null,
     spec_canvas_width: specCanvas ? specCanvas.getBoundingClientRect().width : null,
     spec_client_width: specCanvas ? specCanvas.clientWidth : null,
     spec_img_visible: !!specCanvas && specCanvas.getClientRects().length > 0,
@@ -576,6 +585,21 @@ def main() -> None:
             wait_timings(page5)
             page5.wait_for_timeout(2500)
             page5.evaluate(JS_MARK_CANVASES)  # identity marks on the post-decode canvases
+            # 20. Fit-view spectrogram: FFT at fit view -> canvas.specfit (img hidden); zoom in -> img returns, canvas hidden.
+            page5.locator("#widget button", has_text="fft").click()
+            page5.wait_for_timeout(600)
+            sf_fit = page5.evaluate(JS_STATE)
+            box5 = center_of(page5, wrapper_js)
+            wheel_over(page5, box5, 6)
+            page5.wait_for_timeout(600)
+            sf_zoom = page5.evaluate(JS_STATE)
+            page5.locator("#widget button", has_text="wave").click()
+            page5.mouse.move(box5[0], box5[1])
+            for _ in range(8):                                      # zoom back out to the fit view
+                page5.mouse.wheel(0, 120)
+                page5.wait_for_timeout(120)
+            page5.wait_for_timeout(500)
+            sf_back = page5.evaluate(JS_STATE)
             l_states = [page5.evaluate(JS_STATE)]
             for _ in range(2):                                      # 13: open group 0, close it: column 0 width must not change
                 click_expander(page5, 0)
@@ -604,6 +628,17 @@ def main() -> None:
             page5.evaluate("window.wavlensModel.set('current_time', 7.0)")
             page5.wait_for_timeout(200)
             gap_jump = page5.evaluate(JS_GAP_JUMP, 1500)
+            page5.wait_for_timeout(200)
+            # Masked end: play from 29.9 s (last kept segment ends at 30.0) -> pauses at the end; play again -> wraps to 6.69 s.
+            page5.evaluate("window.wavlensModel.set('current_time', 29.9)")
+            page5.wait_for_timeout(200)
+            page5.locator("#widget button").nth(1).click()
+            page5.wait_for_timeout(700)
+            me_end = page5.evaluate(JS_STATE)
+            page5.locator("#widget button").nth(1).click()
+            page5.wait_for_timeout(350)
+            me_wrap = page5.evaluate(JS_STATE)
+            page5.locator("#widget button").nth(1).click()           # pause
             page5.wait_for_timeout(200)
             page5.locator("#widget button").nth(1).click()           # play again, then click-seek while playing
             page5.wait_for_timeout(300)
@@ -729,6 +764,20 @@ def main() -> None:
             page8.locator('#widget div[data-key="g:2"]').click()
             page8.wait_for_timeout(300)
             g6 = page8.evaluate(JS_STATE)
+            # 21. Empty intersection: a (g:1 after the reorder) and c (g:2) have equal segments -> keep a ∩ complement(c) = ∅.
+            page8.evaluate("window.wavlensModel.set('solo', ['g:1', '!g:2'])")
+            page8.wait_for_timeout(400)
+            em0 = page8.evaluate(JS_STATE)
+            page8.mouse.click(*center_of(page8, JS_READOUT))         # focus the root, then Space must do nothing
+            page8.keyboard.press("Space")
+            page8.wait_for_timeout(400)
+            em1 = page8.evaluate(JS_STATE)
+            page8.evaluate("document.querySelectorAll('#widget button')[1].click()")  # programmatic click on the disabled button
+            page8.wait_for_timeout(300)
+            em2 = page8.evaluate(JS_STATE)
+            page8.evaluate("window.wavlensModel.set('solo', [])")
+            page8.wait_for_timeout(300)
+            em3 = page8.evaluate(JS_STATE)
 
             # 17. Two views of one model: play in A, B follows current_time; pause in A -> both not playing.
             page7 = browser.new_page(viewport={"width": 1100, "height": 900})
@@ -925,6 +974,31 @@ def main() -> None:
                       and parse_readout(cs_playing_state["readout"]) > 12.0,
             },
             "gap_jump_rearm": gap_jump_summary(gap_jump),
+            "masked_end_wrap": {
+                "after_play_from_29.9": {"readout": me_end["readout"], "playing": me_end["playing"]},
+                "after_play_again": {"readout": me_wrap["readout"], "playing": me_wrap["playing"]},
+                "ok": me_end["playing"] is False and abs(parse_readout(me_end["readout"]) - 30.0) < 0.05
+                      and me_wrap["playing"] is True and 6.69 <= parse_readout(me_wrap["readout"]) < 7.2,
+            },
+            "spectrogram_fit": {
+                "fit_view": {"wrapper_width": sf_fit["wrapper_width"], "img_natural_width": sf_fit["spec_img_natural_width"],
+                             "specfit_visible": sf_fit["specfit_visible"], "specimg_visible": sf_fit["specimg_visible"],
+                             "mixspec": sf_fit["mixspec"], "specnote": sf_fit["specnote"], "visible_kind": sf_fit["spec_kind"]},
+                "zoomed_in": {"wrapper_width": sf_zoom["wrapper_width"], "specfit_visible": sf_zoom["specfit_visible"],
+                              "specimg_visible": sf_zoom["specimg_visible"], "visible_kind": sf_zoom["spec_kind"],
+                              "visible_width": sf_zoom["spec_client_width"]},
+                "back_to_fit": {"wrapper_width": sf_back["wrapper_width"]},
+                "ok": sf_fit["specfit_visible"] > 0 and sf_fit["specimg_visible"] == 0 and sf_fit["spec_kind"] == "canvas"
+                      and sf_zoom["specfit_visible"] == 0 and sf_zoom["specimg_visible"] > 0 and sf_zoom["spec_client_width"] == sf_zoom["wrapper_width"],
+            },
+            "empty_intersection": {
+                "solo": em0["solo"], "gaps": em0["gaps_s"], "play_disabled": em0["play_disabled"], "play_title": em0["play_title"],
+                "playing_after_space": em1["playing"], "readout_after_space": em1["readout"],
+                "playing_after_click": em2["playing"],
+                "after_clear": {"play_disabled": em3["play_disabled"], "gaps": len(em3["gaps_s"])},
+                "ok": em0["play_disabled"] is True and bool(em0["play_title"]) and em1["playing"] is False and em2["playing"] is False
+                      and em3["play_disabled"] is False,
+            },
             "mute_whiteout": {
                 "toggle_texts": [t["text"] for t in mute_on["toggles"]],
                 "after_mute_quiet": {"enabled": mute_on["enabled"], "mute_rows": mute_on["mute_rows"], "quiet_checked": mute_on["toggles"][1]["checked"]},
