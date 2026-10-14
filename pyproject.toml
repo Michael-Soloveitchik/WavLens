@@ -13,9 +13,14 @@ authors = [{ name = "Michael Soloveitchik" }]
 requires-python = ">=3.10"
 dependencies = [
     "anywidget>=0.9",
-    "numpy",
-    "soundfile",
-    "pyannote.core>=5",
+    "ipywidgets>=8.0",
+    "traitlets>=5.0",
+    "numpy>=1.22",
+    "soundfile>=0.12",
+    "pyannote.core>=5.0",
+    "matplotlib>=3.5",
+    "Pillow>=9.0",
+    "scipy>=1.8",
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -24,10 +29,11 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-spectrogram = ["matplotlib"]        # spectrogram image (matplotlib pulls in Pillow)
-cubic = ["scipy"]                   # interpolation="cubic"
-all = ["matplotlib", "scipy"]
-dev = ["build", "twine", "playwright", "jupyter", "nbconvert", "pyannote.database", "torch"]
+dev = ["build", "twine", "playwright", "jupyter", "nbconvert", "nbformat", "pyannote.database", "torch"]
+# kept for backward compatibility: these are now part of the core dependencies
+spectrogram = ["matplotlib>=3.5", "Pillow>=9.0"]
+cubic = ["scipy>=1.8"]
+all = ["matplotlib>=3.5", "Pillow>=9.0", "scipy>=1.8"]
 
 [project.urls]
 Homepage = "https://github.com/michaelsoloveitchik/wavlens"

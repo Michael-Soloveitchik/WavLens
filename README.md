@@ -3,14 +3,16 @@
 Interactive waveform, spectrogram, speaker-diarization lanes and a moving playhead, in Jupyter. pyannote-native, NeMo / WavLM aware, one `show()` call.
 
 ```bash
-pip install "wavlens[all]"                                              # PyPI
-pip install "wavlens[all] @ git+https://github.com/Michael-Soloveitchik/WavLens.git"   # latest from GitHub
+pip install wavlens                                                     # PyPI
+pip install git+https://github.com/Michael-Soloveitchik/WavLens.git     # latest from GitHub
 ```
 
 ```python
 import wavlens
 wavlens.show("audio.wav", "audio.rttm")
 ```
+
+Runtime dependencies (all installed automatically): anywidget, ipywidgets, traitlets, numpy, soundfile, pyannote.core, matplotlib, Pillow, scipy. Python ≥ 3.10, any Jupyter front end (JupyterLab, Notebook 7, VS Code).
 
 ![overview](docs/overview.png)
 
@@ -47,7 +49,8 @@ Full reference: `FUNCTIONALITIES.md`. Fixed findings from the bug hunts: `FIXED_
 ## Develop
 
 ```bash
-pip install -e ".[all]"              # editable; extras: spectrogram (matplotlib), cubic (scipy), all, dev
+pip install -e .                     # editable install, all runtime dependencies pulled in (see requirements.txt)
+pip install -r requirements-dev.txt  # tests, notebook, build tools
 npm install && npm run build        # after editing js/wavlens.js; restart the kernel afterwards
 nice python3 tests/test_weights.py                                     # numeric checks
 nice python3 tests/make_fixture.py && nice python3 tests/run_harness.py  # Playwright scenarios, screenshots in tests/out/

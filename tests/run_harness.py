@@ -108,6 +108,9 @@ JS_STATE = """
     gap_whiteouts: overlay ? overlay.querySelectorAll('.gap').length : null,
     gaps_s: overlay ? [...overlay.querySelectorAll('.gap')].map(secs) : [],
     mute_rows: overlay ? [...overlay.querySelectorAll('.mute')].map((d) => d.dataset.row) : [],
+    mute_tops: overlay ? [...overlay.querySelectorAll('.mute')].map((d) => ({ row: d.dataset.row, top: d.style.top })) : [],
+    order: window.wavlensModel && window.wavlensModel.get('order'),
+    mixframes: overlay ? overlay.querySelectorAll('.mixframe').length : null,
     fn_polylines_lanes: laneHost ? laneHost.querySelectorAll('svg polyline').length : 0,
     fn_per_audio_row: (overlay || wrapper) ? [...(overlay || wrapper).querySelectorAll(':scope > svg.fn')]
       .sort((a, b) => parseFloat(a.style.top) - parseFloat(b.style.top))
@@ -585,6 +588,23 @@ def main() -> None:
             quiet.click(); page5.wait_for_timeout(200); mute_on = page5.evaluate(JS_STATE)
             page5.wait_for_timeout(W - 200)
             quiet.click(); page5.wait_for_timeout(W); mute_off = page5.evaluate(JS_STATE)
+            # 19. Audio-row drag: drag the "quiet" pill above "clean" -> order [1,0]; pills, spectrogram rows and .mute tops follow.
+            ad0 = page5.evaluate(JS_STATE)
+            tq = next(t for t in ad0["toggles"] if t["text"] == "quiet")
+            tc = next(t for t in ad0["toggles"] if t["text"] == "clean")
+            page5.mouse.move(tq["x"] + 8, tq["y"] + 8)
+            page5.mouse.down()
+            page5.mouse.move(tq["x"] + 8, tc["y"] - 2, steps=12)
+            page5.wait_for_timeout(100)
+            ad_mid = page5.evaluate("() => { const m = [...document.querySelectorAll('#widget div')].find((d) => /2px solid/.test(d.style.borderTop)); return m ? { display: m.style.display, top: m.style.top } : null; }")
+            page5.mouse.up()
+            page5.wait_for_timeout(400)
+            ad1 = page5.evaluate(JS_STATE)
+            page5.locator("#widget button", has_text="quiet").click(); page5.wait_for_timeout(W)
+            ad_mute = page5.evaluate(JS_STATE)
+            page5.locator("#widget button", has_text="quiet").click(); page5.wait_for_timeout(W)
+            ad_unmute = page5.evaluate(JS_STATE)
+            page5.screenshot(path=str(OUT / "19_audio_drag.png"))
             # 17. Playback under a complement mask (everything but speaker90): start at 6.0 s, the 6.69-7.12 segment must be skipped.
             spk.click(); spk.click(); page5.wait_for_timeout(W)
             m["spk90_complement_again"] = page5.evaluate(JS_STATE)
@@ -826,6 +846,9 @@ def main() -> None:
                 "ok": mute_on["mute_rows"] == ["1"] and mute_off["mute_rows"] == [] and mute_on["enabled"] == [True, False] and mute_off["enabled"] == [True, True],
             },
             "mix_row": mix_row_summary(mix_before, mute_on, mute_off, json.load(open(ROOT / "tests" / "fixture.json"))),
+            "audio_row_drag": audio_drag_summary(ad0, ad_mid, ad1, ad_mute, ad_unmute, json.load(open(ROOT / "tests" / "fixture.json"))),
+            "segments": {"total": s0["lane_segments"], "with_text": s0["lane_segments_with_text"], "titled": s0["lane_segments"],
+                         "no_text_ok": s0["lane_segments_with_text"] == 0 and s0["lane_segments"] > 0},
             "complement_playback": complement_playback_summary(so_play, fixture_groups()),
             "column_geometry": geometry_summary(geo_state, fixture_groups(), fixture_row_height()),
             "cleanup": {
@@ -866,7 +889,7 @@ def main() -> None:
                             ("01_initial.png", "02_seek.png", "03_zoom.png", "04_spectrogram.png",
                              "05_functions.png", "06_fft_zoom.png", "07_ticks.png", "08_expander.png",
                              "09_rows.png", "10_fixed_labels.png", "11_fn_rows.png", "15_solo.png", "17_two_views.png",
-                             "18_drag.png")],
+                             "18_drag.png", "19_audio_drag.png")],
         }
     finally:
         srv.shutdown()
@@ -915,13 +938,38 @@ def mix_row_summary(before: dict, muted: dict, unmuted: dict, fixture: dict) -> 
         "gains_before": before["gains"], "gains_muted": muted["gains"], "gains_unmuted": unmuted["gains"],
         "enabled_echo_muted": muted["enabled"],
         "channel_marks_before": before["channel_marks"], "channel_marks_200ms_after_mute": muted["channel_marks"],
-        "mix_row_rerendered_within_200ms": bool(muted["channel_marks"]) and muted["channel_marks"][-1]["marked"] == 0 and muted["channel_marks"][-1]["canvases"] > 0,
+        # Muting down to one enabled audio removes the mix row: N canvases, N*H heights, no "mix" label; unmute restores N+1.
+        "muted": {"waveform_canvases": muted["waveform_canvases"], "channel_heights": muted["channel_heights"], "mix_label": len(muted["mix_label"]),
+                  "mixframes": muted["mixframes"], "overlay_height": muted["overlay_height"], "spec_height": muted["spec_height"]},
+        "unmuted": {"waveform_canvases": unmuted["waveform_canvases"], "mix_label": len(unmuted["mix_label"]), "mixframes": unmuted["mixframes"],
+                    "overlay_height": unmuted["overlay_height"]},
+        "canvases_rerendered_within_200ms": bool(muted["channel_marks"]) and all(c["marked"] == 0 for c in muted["channel_marks"]),
         "ok": before["peaks_len"] == R and before["spectrograms_len"] == R and before["waveform_canvases"] == R
-              and len(before["mix_label"]) == 1 and "mix" not in before["buttons"]
+              and len(before["mix_label"]) == 1 and before["mixframes"] == 1 and "mix" not in before["buttons"]
               and before["overlay_height"] == R * H and before["spec_height"] == R * H
               and audio_gains(before)[:N] == [round(1 / N, 3)] * N and audio_gains(muted)[:N] == [1.0, 0.0]
               and muted["enabled"] == [True, False]
-              and bool(muted["channel_marks"]) and muted["channel_marks"][-1]["marked"] == 0,
+              and muted["waveform_canvases"] == N and muted["overlay_height"] == N * H and len(muted["mix_label"]) == 0
+              and unmuted["waveform_canvases"] == R and len(unmuted["mix_label"]) == 1
+              and bool(muted["channel_marks"]) and all(c["marked"] == 0 for c in muted["channel_marks"]),
+    }
+
+
+def audio_drag_summary(a0: dict, mid: dict | None, a1: dict, muted: dict, unmuted: dict, fixture: dict) -> dict:
+    N, H = fixture["channels"], fixture["height"]
+    by_y = lambda s: [t["text"] for t in sorted(s["toggles"], key=lambda t: t["y"])]
+    return {
+        "before": {"order": a0["order"], "pills_top_to_bottom": by_y(a0), "waveform_canvases": a0["waveform_canvases"]},
+        "marker_while_dragging": mid,
+        "after_drag_quiet_above_clean": {"order": a1["order"], "pills_top_to_bottom": by_y(a1), "waveform_canvases": a1["waveform_canvases"],
+                                         "enabled": a1["enabled"], "spec_imgs": a1["spec_tile_imgs"]},
+        "mute_quiet_after_drag": {"enabled": muted["enabled"], "mute_tops": muted["mute_tops"], "waveform_canvases": muted["waveform_canvases"],
+                                  "mix_label": len(muted["mix_label"])},
+        "unmute": {"enabled": unmuted["enabled"], "mute_tops": unmuted["mute_tops"], "waveform_canvases": unmuted["waveform_canvases"]},
+        "ok": (a0["order"] in ([], [0, 1])) and a1["order"] == [1, 0] and by_y(a1) == ["quiet", "clean"] and a1["enabled"] == [True, True]
+              and mid is not None and mid["display"] != "none"
+              and muted["enabled"] == [True, False] and muted["mute_tops"] == [{"row": "1", "top": "0px"}] and muted["waveform_canvases"] == N
+              and unmuted["enabled"] == [True, True] and unmuted["mute_tops"] == [] and unmuted["waveform_canvases"] == N + 1,
     }
 
 

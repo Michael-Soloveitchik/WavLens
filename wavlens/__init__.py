@@ -552,12 +552,13 @@ def _functions(bound, duration, method, n=N_POINTS):
 
 # ----------------------------------------------------------------------------- spectrogram
 
-def _mel_rows(db, sr, height, fmax):
-    """(bins, cols) linear-frequency dB -> (height, cols) on a mel axis up to fmax (low frequencies get
-    most of the rows, as librosa's y_axis="mel"); each row takes the max over its bins, so tones survive."""
+def _mel_rows(db, sr, height, fmax, n_bins):
+    """(bins, cols) linear-frequency dB (bins up to fmax, out of n_bins for the full band) -> (height, cols)
+    on a mel axis up to fmax (low frequencies get most of the rows, as librosa's y_axis="mel"); each row
+    takes the max over its bins, so tones survive."""
     mel = lambda f: 2595 * np.log10(1 + f / 700)
     f_edges = 700 * (10 ** (np.linspace(mel(0), mel(fmax), height + 1) / 2595) - 1)
-    b = np.clip(np.round(f_edges / (sr / 2) * (db.shape[0] - 1)).astype(int), 0, db.shape[0] - 1)
+    b = np.clip(np.round(f_edges / (sr / 2) * (n_bins - 1)).astype(int), 0, db.shape[0] - 1)
     return np.stack([db[lo:max(hi, lo + 1)].max(0) for lo, hi in zip(b[:-1], b[1:])])
 
 
@@ -575,6 +576,8 @@ def _spectrogram(x, sr, cmap, height, fscale="mel", fmax=None, n_fft=512, max_co
         raise ValueError(f"unknown colormap {cmap!r}; any matplotlib name works, e.g. magma, viridis, gray_r")
     if fscale not in ("mel", "linear"):
         raise ValueError(f"fscale must be 'mel' or 'linear', got {fscale!r}")
+    if fmax is not None and (isinstance(fmax, (bool, str)) or not isinstance(fmax, (int, float, np.number))):
+        raise ValueError(f"fmax must be a number in Hz, got {fmax!r}")
     fmax = sr / 2 if fmax is None else float(fmax)
     if not 0 < fmax <= sr / 2:
         raise ValueError(f"fmax must be in (0, {sr / 2:.0f}] Hz, got {fmax}")
@@ -597,9 +600,10 @@ def _spectrogram(x, sr, cmap, height, fscale="mel", fmax=None, n_fft=512, max_co
         out[:, c[0]:c[-1] + 1] = np.maximum(out[:, c[0]:c[-1] + 1], pooled)
     ref = max(float(out.max()), 10 ** (floor_dbfs / 20))
     db = np.clip(20 * np.log10(out / ref + 1e-12), -dyn_range, 0) / dyn_range + 1
-    db = db[: max(2, int(round(fmax / (sr / 2) * (db.shape[0] - 1))) + 1)]  # bins up to fmax
+    n_bins = db.shape[0]
+    db = db[: max(2, int(round(fmax / (sr / 2) * (n_bins - 1))) + 1)]  # bins up to fmax
     if fscale == "mel":
-        db = _mel_rows(db, sr, height, fmax)
+        db = _mel_rows(db, sr, height, fmax, n_bins)
     elif height < db.shape[0]:  # shrink by max-pooling so a 1-bin tone keeps its brightness
         edges = (np.arange(height) * db.shape[0]) // height
         db = np.maximum.reduceat(db, edges, axis=0)
@@ -652,6 +656,48 @@ class WavLens(anywidget.AnyWidget):
             raise traitlets.TraitError(f"{p['trait'].name} must be finite and {'> 0' if p['trait'].name == 'step' else '>= 0'}")
         return v
 
+    @traitlets.validate("expanded")
+    def _expanded_names(self, p):
+        names = [g["name"] for g in self.groups]
+        out = []
+        for n in p["value"]:
+            if n not in names:
+                raise traitlets.TraitError(f"unknown annotation {n!r}; have {names}")
+            if n not in out:
+                out.append(n)
+        return out
+
+    @traitlets.validate("groups")
+    def _groups_shape(self, p):
+        v = p["value"]
+        if not all(isinstance(g, dict) and {"name", "rows", "segments"} <= set(g) for g in v):
+            raise traitlets.TraitError("groups must be a list of {name, rows, segments} dicts (reorder w.groups, do not rebuild it)")
+        return v
+
+    @traitlets.observe("groups")
+    def _groups_reordered(self, change):
+        """Reassigning w.groups (e.g. a new order) keeps solo/dimmed/expanded pointing at the same names."""
+        old = [g["name"] for g in (change["old"] or [])]
+        if not old or old == [g["name"] for g in self.groups]:
+            return
+        new = {g["name"]: i for i, g in enumerate(self.groups)}
+        rows = {g["name"]: set(g["rows"]) for g in self.groups}
+
+        def remap(key):
+            inv, k = key.startswith("!"), key.lstrip("!")
+            kind, i, *rest = k.split(":")
+            name = old[int(i)] if int(i) < len(old) else None
+            if name not in new or (rest and rest[0] not in rows[name]):
+                return None
+            return ("!" if inv else "") + ":".join([kind, str(new[name]), *rest])
+        self.solo = [k for k in map(remap, self.solo) if k]
+        self.dimmed = [k for k in map(remap, self.dimmed) if k]
+        self.expanded = [n for n in self.expanded if n in new]
+
+    def close(self):
+        self._mix = None  # release the kept audio copies
+        super().close()
+
     @traitlets.validate("order")
     def _order_perm(self, p):
         v = [int(i) for i in p["value"]]
@@ -678,7 +724,7 @@ class WavLens(anywidget.AnyWidget):
         xs, sr, cmap, height, fscale, fmax = self._mix
         on = [x for x, e in zip(xs, self.enabled) if e]
         mix = sum(on) / len(on) if on else np.zeros_like(xs[0])  # 1/m over the m selected audios
-        spec = _cache.get_or(_digest(mix, sr, cmap, height, fscale, fmax), lambda: _spectrogram(mix, sr, cmap, height, fscale, fmax))
+        spec = _cache.get_or(_digest(_digest(mix, sr), cmap, height, fscale, fmax), lambda: _spectrogram(mix, sr, cmap, height, fscale, fmax))
         if self.spectrograms and self.spectrograms[-1] != spec:
             self.spectrograms = self.spectrograms[:len(xs)] + [spec]
 
@@ -815,6 +861,20 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
     for a in items:
         if isinstance(a, tuple) and len(a) == 2 and not _is_audio(a) and not _is_ann(a):
             raise ValueError(f"(audio, sample_rate) tuple needs a numeric rate, got {a[1]!r}")
+    flat = []  # a positional list / dict whose items are all audios or all annotations is unpacked
+    for a in items:
+        if not _is_audio(a) and not _is_ann(a) and isinstance(a, (list, tuple, dict)) and len(a):
+            vals = list(a.values()) if isinstance(a, dict) else list(a)
+            if all(map(_is_audio, vals)):
+                audio = {**(audio or {}), **a} if isinstance(a, dict) and (audio is None or isinstance(audio, dict)) else audio
+                if not isinstance(a, dict): flat += vals
+                continue
+            if all(map(_is_ann, vals)):
+                annotation = {**(annotation or {}), **a} if isinstance(a, dict) and (annotation is None or isinstance(annotation, dict)) else annotation
+                if not isinstance(a, dict): flat += vals
+                continue
+        flat.append(a)
+    items = flat
     pos_audio = [a for a in items if _is_audio(a)]
     pos_ann = [a for a in items if _is_ann(a)]
     rest = [type(a).__name__ for a in items if not _is_audio(a) and not _is_ann(a)]
@@ -857,7 +917,10 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
     w.enabled = [bool(e) for e in enabled] if enabled is not None else [True] * len(loaded)
     w.order = list(range(len(loaded))) if order is None else [int(i) for i in order]
     names_g = [g["name"] for g in w.groups]
-    w.expanded = names_g if expanded is True else [n for n in ([expanded] if isinstance(expanded, str) else expanded) if n in names_g]
+    if expanded is True:
+        w.expanded = names_g
+    elif expanded:
+        w.expanded = [expanded] if isinstance(expanded, str) else [str(n) for n in expanded]
     if solo is not None and solo != [] and solo != "":
         w.solo_(*(solo if isinstance(solo, list) else [solo]))
     if dim:

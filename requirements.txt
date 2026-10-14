@@ -1,0 +1,10 @@
+# runtime, same as [project.dependencies] in pyproject.toml
+anywidget>=0.9
+ipywidgets>=8.0
+traitlets>=5.0
+numpy>=1.22
+soundfile>=0.12
+pyannote.core>=5.0
+matplotlib>=3.5
+Pillow>=9.0
+scipy>=1.8

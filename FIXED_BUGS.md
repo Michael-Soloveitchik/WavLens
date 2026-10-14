@@ -108,6 +108,19 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | R14 | No text on the segments; speaker names only in the expander column (and the hover title) | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
+## Third pass (expander, drag, mix row, mel axis)
+
+| # | Finding | Fix | Status |
+|---|---|---|---|
+| 39 | Mel axis with `fmax` below Nyquist mis-scaled frequencies (440 Hz read 717 Hz at `fmax=5000`, tones above ~3.1 kHz vanished): bins were sliced before the mel mapping | mapping uses the full-band bin count | ✅ |
+| 40 | `expanded=False` / `None` raised `TypeError` | falsy → none; names validated against the annotations, duplicates dropped | ✅ |
+| 41 | Reassigning `w.groups` from Python left solo/dimmed/expanded keys pointing at the wrong annotation | observer remaps keys by name, drops vanished ones; `groups` shape validated | ✅ |
+| 42 | Mix spectrogram computed twice per `show()` (two cache key forms) | one key form | ✅ |
+| 43 | `fmax="5000"` / `True` accepted through `float()` | numbers only | ✅ |
+| 44 | `_mix` kept the audio copies for the kernel lifetime | released in `close()` | ✅ |
+| 45 | Positional list / dict of audios or annotations rejected despite the docs | unpacked when all items are audios or all annotations | ✅ |
+| 46 | Dependencies: matplotlib, Pillow, scipy, ipywidgets, traitlets were optional or implicit | all runtime deps explicit in `pyproject.toml` and `requirements.txt`; verified by installing the wheel alone in a fresh venv | ✅ |
+
 ## Lifecycle and sync
 
 | # | Finding | Fix | Status |

@@ -1,0 +1,9 @@
+-r requirements.txt
+build
+twine
+playwright
+jupyter
+nbconvert
+nbformat
+pyannote.database
+torch
