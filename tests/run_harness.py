@@ -175,6 +175,7 @@ JS_STATE = """
     name_divs: col0Divs.filter((d) => d.dataset.key).map((d) => { const r = d.getBoundingClientRect();
       return { key: d.dataset.key, text: d.textContent, x: r.x, y: r.y, h: r.height, outline: d.style.outline, left: d.style.left }; }),
     seg_top_by_group: segDivs.reduce((acc, d) => { const t = parseFloat(d.style.top); acc[d.dataset.group] = Math.min(acc[d.dataset.group] ?? 1e9, t); return acc; }, {}),
+    seg_tops_by_group: segDivs.reduce((acc, d) => { const t = parseFloat(d.style.top); (acc[d.dataset.group] ||= []); if (!acc[d.dataset.group].includes(t)) acc[d.dataset.group].push(t); return acc; }, {}),
     // Mix row (N >= 2 audios): "mix" label in column 0 (a div, not a button), blue-framed div in the overlay, N+1 peaks/spectrograms.
     mix_label: col0Divs.filter((d) => !d.dataset.key && d.textContent === 'mix').map((d) => ({ top: d.style.top, border: d.style.border })),
     mix_frames: overlay ? [...overlay.children].filter((d) => d.tagName === 'DIV' && /30, 136, 229|1e88e5/.test(d.style.borderTop + d.style.border + d.style.borderColor)).map((d) => ({ top: d.style.top, height: d.style.height })) : [],
@@ -440,7 +441,8 @@ def main() -> None:
             s5 = page.evaluate(JS_STATE)
             page.screenshot(path=str(OUT / "07_ticks.png"))
 
-            # 3. Expanders: ▸ of group 1 -> expanded ["speech"]; ▸ of group 0 too -> both; ▾ of group 1 -> only group 0; close all.
+            # 3. Expanders (default: all open, one row per speaker). Chevron of group 1 -> collapse "speech"; group 0 -> collapse
+            #    "reference" (its segments share ONE row, no column-1 labels, lanes shrink by (rows-1)*RH); then re-open both.
             e_states = [page.evaluate(JS_STATE)]
             for idx in (1, 0, 1, 0):
                 click_expander(page, idx)
@@ -448,9 +450,7 @@ def main() -> None:
                 e_states.append(page.evaluate(JS_STATE))
                 if len(e_states) == 3:
                     page.screenshot(path=str(OUT / "08_expander.png"))
-            click_expander(page, 0)   # leave group 0 open so column 1 exists for later geometry/label checks on this page
-            page.wait_for_timeout(300)
-            s6b = page.evaluate(JS_STATE)
+            s6b = e_states[-1]
 
             # 4. Transport: play (echoed to model), pause, then nudge back twice.
             buttons = page.locator("#widget button")
