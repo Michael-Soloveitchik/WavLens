@@ -7,7 +7,7 @@ Complete reference of what `wavlens.show(...)` accepts and what the widget does.
 ```python
 wavlens.show(*items, audio=None, annotation=None, function=None, sample_rate=None,
            height=96, row_height=16, weights=None, interpolation="linear", colors=None,
-           colormap="magma", view="wave", expanded=(), step=0.01,
+           colormap="magma", view="wave", expanded=True, step=0.01,
            enabled=None, solo=None, dim=(), zoom=0.0, time=0.0, autoplay=False, threshold=0.5,
            fscale="mel", fmax=None, order=None) -> WavLens
 ```
@@ -94,11 +94,11 @@ Mirror the `audio` form: dict ↔ dict with the same keys, list ↔ list of the 
 Rows top to bottom:
 1. Panel row 1: time readout (seconds, 3 decimals) | `◀` (−step) | play/pause (green circle) | `▶` (+step). Tooltips show the step.
 2. Panel row 2: `none`/`all` (left, dark pill, toggles every audio; label = next action) | `FFT`/`WAVE` (small caps pill).
-3. Gutter column 0: per-audio checkbox + name at each audio row (green check = playing, empty box = muted; press-hold-drag the pill to reorder the audio rows, `order` trait = permutation of the original indices, waveforms / spectrograms / mute white-outs / bound functions follow); at each lane group a small chevron expander (`button.exp`, rotates when open) and the annotation name (click = mask cycle; press-hold-drag beyond 5 px = move the group up or down, a blue line shows the drop position, the new order is written to `groups`, mask keys follow). Width = widest entry or the all/none button (dark filled pill).
-4. Gutter column 1: one coloured speaker label per lane row, only for the annotations whose chevron is open (`expanded` trait / argument); collapses when none is open (click = mask cycle). Width = widest label. Light colours get a dark halo.
+3. Gutter column 0: per-audio checkbox + name at each audio row (green check = playing, empty box = muted; press-hold-drag the pill to reorder the audio rows, `order` trait = permutation of the original indices, waveforms / spectrograms / mute white-outs / bound functions follow); at each lane group a small chevron (`button.exp`, rotates when open) that expands (one row per speaker, labels in column 1) or collapses the annotation (all speakers in ONE row, no labels; the block shrinks) and the annotation name (click = mask cycle; press-hold-drag beyond 5 px = move the group up or down, a blue line shows the drop position, the new order is written to `groups`, mask keys follow). Width = widest entry or the all/none button (dark filled pill).
+4. Gutter column 1: one coloured speaker label per lane row, only for the expanded annotations (`expanded` trait / argument, default all); collapses when none is open (click = mask cycle). Width = widest label. Light colours get a dark halo.
 5. Audio rows, `height` px each: waveform (first paint from 2000 peaks, exact samples after background decode) or spectrogram image (`fft`). Function lines overlay (SVG, 1 px). While two or more audios are **selected** a last **mix row** (blue frame, label `mix`, no checkbox) shows the mean of the selected audios, i.e. what is played; it appears and disappears with the selection and re-renders on every toggle (waveform in the browser, spectrogram recomputed by Python when `enabled` changes).
 6. Timeline, 16 px: ticks ≥ 6 px apart, secondary labels ≥ 40 px, primary ≥ 90 px, decimals for sub-second steps; recomputed on every zoom.
-7. Lane groups, `row_height` px per label row, in the order of `groups` (draggable); segments are plain coloured bars (speaker name only in the `▸` column and in the hover title).
+7. Lane groups, `row_height` px per label row (one row when collapsed), in the order of `groups` (draggable); segments are plain coloured bars (speaker name only in the `▸` column and in the hover title).
 
 Everything inside the scroll wrapper is sized in percent of the duration: zoom is CSS stretching, no recompute. The red playhead spans all rows.
 

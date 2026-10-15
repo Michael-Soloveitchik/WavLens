@@ -16,7 +16,7 @@ Runtime dependencies (all installed automatically): anywidget, ipywidgets, trait
 
 ![overview](docs/overview.png)
 
-Two audios (`clean`, `noisy`) and the framed `mix` row (the mean of the selected audios, what you hear), a reference and a hypothesis annotation, an RMS curve on every row, the chevron beside an annotation opening its speaker column. Wheel = zoom around the pointer, click = seek, space = play/pause, ← / → = 10 ms. Every button is labelled with what its next click does.
+Two audios (`clean`, `noisy`) and the framed `mix` row (the mean of the selected audios, what you hear), a reference and a hypothesis annotation, an RMS curve on every row, the chevron beside an annotation collapsing it to one row or expanding it to a row per speaker. Wheel = zoom around the pointer, click = seek, space = play/pause, ← / → = 10 ms. Every button is labelled with what its next click does.
 
 ```python
 wavlens.show(audio={"clean": (x, sr), "noisy": (y, sr)},
@@ -34,7 +34,7 @@ Click a speaker or an annotation name: keep its segments → keep the complement
 
 ![many](docs/many.png)
 
-Any number of annotations and speakers: the lane block grows (`row_height`); the chevron beside a name opens that annotation's speaker column; drag a name (or an audio's pill) to reorder; colours are deterministic (Set1, pyannote's palette) or yours via `colors={speaker: css}` (per annotation: a dict of such dicts).
+Any number of annotations and speakers: the lane block grows (`row_height`); the chevron beside a name collapses that annotation to a single row (all speakers stacked) or expands it to a row per speaker with labels; drag a name (or an audio's pill) to reorder; colours are deterministic (Set1, pyannote's palette) or yours via `colors={speaker: css}` (per annotation: a dict of such dicts).
 
 ![compare](docs/compare.png)
 

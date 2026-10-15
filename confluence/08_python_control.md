@@ -11,7 +11,7 @@
 | <span dir="ltr">`enabled=[True, False]`</span> | אילו אודיו דולק |
 | <span dir="ltr">`solo=["ref", "!ref/speaker91"]`</span> | מסכות; `!` = השלמה |
 | <span dir="ltr">`dim=["hyp/A"]`</span> | עמעום (רק מ-Python) |
-| <span dir="ltr">`expanded=True`</span> או רשימת שמות | אילו אנוטציות פתוחות |
+| <span dir="ltr">`expanded=True`</span> (ברירת מחדל) או רשימת שמות | אילו אנוטציות פתוחות (שורה לכל דובר); השאר מקופלות לשורה אחת |
 | <span dir="ltr">`order=[1, 0]`</span> | סדר שורות האודיו |
 | <span dir="ltr">`zoom=40`</span> | פיקסלים לשנייה; 0 = התאמה לרוחב |
 | <span dir="ltr">`time=10.2`</span> | מיקום התחלתי |

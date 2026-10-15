@@ -174,6 +174,7 @@ function render({ model, el: host }) {
     return out;
   };
   let mixTimer;
+  const nRows = (g) => (expanded.has(g.name) ? g.rows.length : 1);  // a collapsed annotation takes one row
   let laneTopDrawn = -1;  // lanes.offsetTop used by the last draw(); the columns are re-placed when the rows move
   const renderMix = () => {
     if (!orig) return;
@@ -359,20 +360,21 @@ function render({ model, el: host }) {
       if (own.length) overlay.appendChild(lines(own, r * H, H));
     }
     applyEnabled();
-    const nrows = groups.reduce((n, g) => n + g.rows.length, 0);
+    const nrows = groups.reduce((n, g) => n + nRows(g), 0);
     lanes.style.height = `${nrows * RH}px`;
     const laneTop = lanes.offsetTop;  // measured: wherever the timeline really ends
     laneTopDrawn = laneTop;
     let top = 0;
     groups.forEach((g, gi) => {
       const shared = fns.filter((f) => f.row === -1 || f.row == null);
-      if (shared.length) lanes.appendChild(lines(shared, top, g.rows.length * RH));
+      const open = expanded.has(g.name);  // open: one row per speaker + labels; closed: every speaker in one row
+      if (shared.length) lanes.appendChild(lines(shared, top, nRows(g) * RH));
       const color = {};
       for (const s of g.segments) {
         color[s.label] = s.color;
         const h = Math.max(RH - 2, 2);
         const d = el("div",
-          `position:absolute;top:${top + g.rows.indexOf(s.label) * RH + 1}px;height:${h}px;left:${pct(s.start)};width:${pct(s.end - s.start)};` +
+          `position:absolute;top:${top + (open ? g.rows.indexOf(s.label) : 0) * RH + 1}px;height:${h}px;left:${pct(s.start)};width:${pct(s.end - s.start)};` +
           `background:${s.color};border-radius:2px;box-sizing:border-box;`);  // no text on the segment: names live in the expander column
         d.title = `${s.label} ${s.start.toFixed(2)}–${s.end.toFixed(2)}s`;
         d.dataset.group = gi;
@@ -381,12 +383,11 @@ function render({ model, el: host }) {
         lanes.appendChild(d);
       }
       const y = (i) => laneTop + top + i * RH + Math.max(0, (RH - 12) / 2);
-      const open = expanded.has(g.name);
       const tog = el("button", `position:absolute;left:2px;top:${y(0) - 1}px;width:13px;height:13px;padding:0;border:0;background:none;color:#888;cursor:pointer;display:flex;align-items:center;justify-content:center;`);
       tog.className = "exp";
       tog.innerHTML = `<svg width="8" height="8" viewBox="0 0 8 8" style="transform:rotate(${open ? 90 : 0}deg);transition:transform .12s"><path d="M2 1l4 3-4 3z" fill="currentColor"/></svg>`;
       tog.setAttribute("aria-label", open ? "collapse" : "expand");
-      tog.title = open ? "hide this annotation's speakers" : "show this annotation's speakers";
+      tog.title = open ? "collapse: all speakers in one row" : "expand: one row per speaker";
       tog.onclick = () => {
         open ? expanded.delete(g.name) : expanded.add(g.name);
         const known = new Set(groups.map((x) => x.name));
@@ -400,7 +401,7 @@ function render({ model, el: host }) {
       draggable(nameEl, gi);
       col0.appendChild(nameEl);
       if (open) g.rows.forEach((r, i) => { if (r) clickable(col1.appendChild(text(r, y(i), color[r])), `l:${gi}:${r}`); });
-      top += g.rows.length * RH;
+      top += nRows(g) * RH;
     });
     // columns: as wide as their widest entry (column 0 also fits the all/none button); column 1 collapses when nothing is expanded
     const h = laneTop + top;
@@ -455,7 +456,7 @@ function render({ model, el: host }) {
   };
   const draggable = (d, gi) => dragRows(d, gi, () => {  // annotation groups: boundaries at group tops
     const groups = model.get("groups") || [], out = [lanes.offsetTop];
-    for (const g of groups) out.push(out[out.length - 1] + g.rows.length * RH);
+    for (const g of groups) out.push(out[out.length - 1] + nRows(g) * RH);
     return out;
   }, (from, dest) => {
     const groups = model.get("groups") || [], perm = groups.map((_, k) => k);

@@ -858,7 +858,7 @@ wavlens_mod.default.render({{model,el:document.getElementById("wavlens")}});}})(
 # ----------------------------------------------------------------------------- show
 
 def show(*items, audio=None, annotation=None, function=None, sample_rate=None, height=96, row_height=16,
-         weights=None, interpolation="linear", colors=None, colormap="magma", view="wave", expanded=(),
+         weights=None, interpolation="linear", colors=None, colormap="magma", view="wave", expanded=True,
          step=0.01, enabled=None, solo=None, dim=(), zoom=0.0, time=0.0, autoplay=False, threshold=0.5,
          fscale="mel", fmax=None, order=None):
     """wavlens.show(audio, annotation, ...) positional in any order, or by keyword.
