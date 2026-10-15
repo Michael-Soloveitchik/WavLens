@@ -601,13 +601,11 @@ def main() -> None:
             page5.wait_for_timeout(500)
             sf_back = page5.evaluate(JS_STATE)
             l_states = [page5.evaluate(JS_STATE)]
-            for _ in range(2):                                      # 13: open group 0, close it: column 0 width must not change
+            for _ in range(2):                                      # 13: collapse group 0, re-open it: column 0 width must not change
                 click_expander(page5, 0)
                 page5.wait_for_timeout(300)
                 l_states.append(page5.evaluate(JS_STATE))
-            click_expander(page5, 0)                                # open group 0 so its speaker labels exist for 14/15
-            page5.wait_for_timeout(300)
-            geo_state = page5.evaluate(JS_STATE)
+            geo_state = l_states[-1]                                # all open again: speaker labels exist for 14/15
             # 14. Dim is Python-only now: set model.dimmed and check label + segment opacity, then clear.
             page5.evaluate("window.wavlensModel.set('dimmed', ['l:0:speaker90'])"); page5.wait_for_timeout(200)
             dim_on = page5.evaluate(JS_STATE)
@@ -714,9 +712,7 @@ def main() -> None:
             page8.on("pageerror", lambda e: page_errors.append(f"(drag) {e}"))
             page8.goto(f"http://127.0.0.1:{port}/tests/harness.html?fixture=fixture_3groups.json", wait_until="commit")
             wait_timings(page8)
-            page8.wait_for_timeout(600)
-            click_expander(page8, 0)                                 # open "a"
-            page8.wait_for_timeout(300)
+            page8.wait_for_timeout(600)                              # all annotations start open: a's speaker labels exist
             page8.locator('#widget div[data-key="l:0:speaker90"]').click()
             page8.wait_for_timeout(300)
             g0 = page8.evaluate(JS_STATE)
@@ -939,8 +935,12 @@ def main() -> None:
                 "col1_display": [s["col1_display"] for s in l_states],
                 "wrapper_scroll_widths": [s["wrapper_scroll_width"] for s in l_states],
                 "canvases_same_objects_per_state": [s["marked_canvases"] == s["waveform_canvases"] and s["waveform_canvases"] > 0 for s in l_states],
+                "lanes_heights": [s["lanes_height"] for s in l_states],
                 "col0_width_unchanged": len({s["gutter_widths"][0] for s in l_states}) == 1,
-                "ok": len({s["gutter_widths"][0] for s in l_states}) == 1 and [s["col1_display"] for s in l_states] == ["none", "block", "none"],
+                # collapse "reference" (2 speakers -> 1 row): column 1 loses its labels (display none), lanes shrink by RH; re-open restores.
+                "ok": len({s["gutter_widths"][0] for s in l_states}) == 1 and [s["col1_display"] for s in l_states] == ["block", "none", "block"]
+                      and l_states[0]["lanes_height"] - l_states[1]["lanes_height"] == fixture_row_height()
+                      and l_states[2]["lanes_height"] == l_states[0]["lanes_height"],
             },
             "drag_reorder": drag_summary(g0, g_mid, g1, g2),
             "drag_remap_and_noop": {
@@ -1165,28 +1165,35 @@ def click_expander(page, idx: int) -> None:
 
 
 def expander_summary(states: list, final: dict) -> dict:
-    steps = ["start", "open_1", "open_0_too", "close_1", "close_0"]
+    """Default all open. Steps: collapse group 1 (speech, 1 row: no change), collapse group 0 (reference: 2 rows -> 1,
+    labels gone, lanes shrink by RH, its segments share one top), re-open group 1, re-open group 0."""
+    steps = ["start_all_open", "collapse_1", "collapse_0_too", "open_1", "open_0"]
+    rh = fixture_row_height()
     out = {}
     for name, s in zip(steps, states):
         out[name] = {"expanded": s["expanded"], "expander_aria": [e["aria"] for e in s["expanders"]],
                      "expander_svg": all(e["has_svg"] for e in s["expanders"]) and bool(s["expanders"]),
                      "col1_display": s["col1_display"], "col1_labels": [l["key"] for l in s["col1_labels"]],
                      "col0_width": s["gutter_widths"][0], "col1_width": s["gutter_widths"][1],
-                     "segments_with_text": s["lane_segments_with_text"]}
-    exp = [s["expanded"] for s in states]
-    labels = [[l["key"] for l in s["col1_labels"]] for s in states]
+                     "lanes_height": s["lanes_height"], "group0_seg_tops": sorted(s["seg_tops_by_group"].get("0", [])),
+                     "segments_total": s["lane_segments"]}
+    exp = [sorted(s["expanded"] or []) for s in states]
+    labels = [sorted(l["key"] for l in s["col1_labels"]) for s in states]
     aria = [[e["aria"] for e in s["expanders"]] for s in states]
-    aria_ok = aria == [["expand", "expand"], ["expand", "collapse"], ["collapse", "collapse"], ["collapse", "expand"], ["expand", "expand"]]
-    out["aria_sequence_ok"] = aria_ok
+    spk = ["l:0:speaker90", "l:0:speaker91"]
+    h0 = states[0]["lanes_height"]
+    ok = (exp == [["reference", "speech"], ["reference"], [], ["speech"], ["reference", "speech"]]
+          and labels[0] == spk and labels[1] == spk and labels[2] == [] and labels[3] == [] and labels[4] == spk
+          and states[2]["col1_display"] == "none" and states[0]["col1_display"] != "none" and states[4]["col1_display"] != "none"
+          and states[1]["lanes_height"] == h0 and states[2]["lanes_height"] == h0 - rh and states[4]["lanes_height"] == h0
+          and len(states[2]["seg_tops_by_group"].get("0", [])) == 1 and len(states[0]["seg_tops_by_group"].get("0", [])) == 2
+          and all(s["lane_segments"] == states[0]["lane_segments"] for s in states)
+          and len({s["gutter_widths"][0] for s in states}) == 1)
+    out["aria_sequence"] = aria
+    out["aria_consistent"] = all(a == ["collapse" if n in (s["expanded"] or []) else "expand" for n in s["group_names"]] for a, s in zip(aria, states))
     out["toggle_texts"] = [t["text"] for t in states[0]["toggles"]]
-    ok = aria_ok and (exp == [[], ["speech"], ["speech", "reference"], ["reference"], []]
-          and labels[1] == [] and sorted(labels[2]) == ["l:0:speaker90", "l:0:speaker91"] and sorted(labels[3]) == ["l:0:speaker90", "l:0:speaker91"]
-          and states[4]["col1_display"] == "none" and states[2]["col1_display"] != "none"
-          and len({s["gutter_widths"][0] for s in states}) == 1
-          and all(s["lane_segments_with_text"] == states[0]["lane_segments_with_text"] for s in states))
-    out["note"] = "group 1 ('speech') has a blank-label row, so opening it alone adds no column-1 label and column 1 stays display:none"
-    out["final_open_0"] = {"expanded": final["expanded"], "col1_labels": [l["key"] for l in final["col1_labels"]]}
-    out["ok"] = ok
+    out["note"] = "group 1 ('speech') has a single blank-label row, so collapsing it changes nothing visible"
+    out["ok"] = ok and out["aria_consistent"]
     return out
 
 
@@ -1229,13 +1236,17 @@ def legend_stability_summary(states: list) -> dict:
 
 
 def geometry_summary(state: dict, groups: list, rh: int) -> dict:
+    """Expected label centres: one row per speaker for an open annotation, a single row for a collapsed one."""
     rows_before = 0
     expected = {}
+    opened = set(state.get("expanded") or [])
     for gi, g in enumerate(groups):
-        for i, r in enumerate(g["rows"]):
-            expected[f"l:{gi}:{r}"] = state["lanes_top"] + (rows_before + i) * rh + rh / 2
+        is_open = g.get("name") in opened
+        if is_open:
+            for i, r in enumerate(g["rows"]):
+                expected[f"l:{gi}:{r}"] = state["lanes_top"] + (rows_before + i) * rh + rh / 2
         expected[f"g:{gi}"] = state["lanes_top"] + rows_before * rh + rh / 2
-        rows_before += len(g["rows"])
+        rows_before += len(g["rows"]) if is_open else 1
     checks = []
     for l in state["name_labels"]:
         if l["key"] not in expected:
