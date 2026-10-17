@@ -805,6 +805,68 @@ def main() -> None:
             page8.wait_for_timeout(300)
             em3 = page8.evaluate(JS_STATE)
 
+            # 22-24. Settings popover, copy pill (clipboard) and hypothesis-step slider on the steps fixture.
+            ctx9 = browser.new_context(viewport={"width": 1100, "height": 500}, permissions=["clipboard-read", "clipboard-write"])
+            page9 = ctx9.new_page()
+            page9.on("console", lambda m: console.append(f"[{m.type}] (panel) {m.text}"))
+            page9.on("pageerror", lambda e: page_errors.append(f"(panel) {e}"))
+            page9.goto(f"http://127.0.0.1:{port}/tests/harness.html?fixture=fixture_steps.json", wait_until="commit")
+            wait_timings(page9)
+            page9.wait_for_timeout(2500)
+            p0 = page9.evaluate(JS_PANEL)
+            page9.locator("#widget button[title='spectrogram settings']").click()      # 22. open the popover (also shows the FFT layer)
+            page9.wait_for_timeout(300)
+            p_open = page9.evaluate(JS_PANEL)
+            page9.evaluate("""() => { const r = document.querySelectorAll('#widget .wl-pop input.wl-range')[2]; r.value = '60'; r.dispatchEvent(new Event('input', { bubbles: true })); }""")
+            page9.wait_for_timeout(80)
+            p_before_debounce = page9.evaluate(JS_PANEL)
+            page9.wait_for_timeout(300)
+            p_range = page9.evaluate(JS_PANEL)
+            page9.locator("#widget .wl-pop .seg button", has_text="linear").click()
+            page9.wait_for_timeout(300)
+            p_scale = page9.evaluate(JS_PANEL)
+            page9.select_option("#widget .wl-pop select", "viridis")
+            page9.wait_for_timeout(300)
+            p_cmap = page9.evaluate(JS_PANEL)
+            page9.evaluate("window.wavlensModel.set('spectrograms', window.wavlensModel.get('spectrograms').slice())")  # kernel delivered new images
+            page9.wait_for_timeout(300)
+            p_specs = page9.evaluate(JS_PANEL)
+            page9.mouse.click(*center_of(page9, JS_READOUT))                            # outside pointerdown closes it
+            page9.wait_for_timeout(200)
+            p_closed = page9.evaluate(JS_PANEL)
+            # 23. Copy pill: solo "ref", move the step slider to e2, copy -> clipboard string reflects view/solo/step_index.
+            page9.locator('#widget div[data-key="g:0"]').click()
+            page9.wait_for_timeout(300)
+            st0 = page9.evaluate(JS_PANEL)
+            page9.evaluate("""() => { const r = document.querySelector('#widget input.wl-step'); r.value = '1'; r.dispatchEvent(new Event('input', { bubbles: true })); }""")
+            page9.wait_for_timeout(400)
+            st1 = page9.evaluate(JS_PANEL)
+            st1_state = page9.evaluate(JS_STATE)
+            page9.locator("#widget button", has_text=re.compile(r"^copy$")).click()
+            page9.wait_for_timeout(200)
+            cp_mid = page9.evaluate(JS_PANEL)
+            clip = page9.evaluate("() => navigator.clipboard.readText()")
+            page9.wait_for_timeout(1300)
+            cp_after = page9.evaluate(JS_PANEL)
+            # 24. Slider follows Python: step_index set from the model side -> slider + label + groups follow; solo keys stay valid.
+            hyp_idx = st1["group_names"].index("hyp")
+            page9.locator(f'#widget div[data-key="l:{hyp_idx}:speaker90"]').click()
+            page9.wait_for_timeout(300)
+            st_solo = page9.evaluate(JS_PANEL)
+            page9.evaluate("window.wavlensModel.set('step_index', 0)")
+            page9.wait_for_timeout(400)
+            st2 = page9.evaluate(JS_PANEL)
+            st2_state = page9.evaluate(JS_STATE)
+            page9.screenshot(path=str(OUT / "20_steps_panel.png"))
+            # live=false: the settings button is disabled with an explanatory title.
+            page10 = ctx9.new_page()
+            page10.on("pageerror", lambda e: page_errors.append(f"(live) {e}"))
+            page10.goto(f"http://127.0.0.1:{port}/tests/harness.html?fixture=fixture_steps.json&override=" + json.dumps({"live": False}), wait_until="commit")
+            wait_timings(page10)
+            page10.wait_for_timeout(500)
+            p_live = page10.evaluate(JS_PANEL)
+            ctx9.close()
+
             # 17. Two views of one model: play in A, B follows current_time; pause in A -> both not playing.
             page7 = browser.new_page(viewport={"width": 1100, "height": 900})
             page7.on("console", lambda m: console.append(f"[{m.type}] (views) {m.text}"))
@@ -973,6 +1035,45 @@ def main() -> None:
                       and l_states[2]["lanes_height"] == l_states[0]["lanes_height"],
             },
             "drag_reorder": drag_summary(g0, g_mid, g1, g2),
+            "settings_popover": {
+                "initial": {"gear": p0["gear"], "pop_display": p0["pop"]["display"] if p0["pop"] else None, "fft_text": p0["fft_text"], "spec_params": p0["spec_params"]},
+                "opened": {"visible": p_open["pop"]["visible"], "ranges": p_open["pop"]["ranges"], "seg": p_open["pop"]["seg_buttons"],
+                           "select": p_open["pop"]["select"], "values": p_open["pop"]["values"], "fft_text": p_open["fft_text"]},
+                "range_edit": {"before_debounce_params_range_db": p_before_debounce["spec_params"].get("range_db"),
+                               "after_params_range_db": p_range["spec_params"].get("range_db"), "spec_opacity": p_range["spec_opacity"],
+                               "value_label": p_range["pop"]["values"][2]},
+                "scale_edit": {"fscale": p_scale["spec_params"].get("fscale"), "seg": p_scale["pop"]["seg_buttons"]},
+                "colormap_edit": {"colormap": p_cmap["spec_params"].get("colormap")},
+                "after_new_spectrograms": {"spec_opacity": p_specs["spec_opacity"]},
+                "closed_by_outside_pointerdown": {"display": p_closed["pop"]["display"], "visible": p_closed["pop"]["visible"]},
+                "ok": p0["pop"]["display"] == "none" and p_open["pop"]["visible"] and p_open["pop"]["ranges"] == 3 and p_open["fft_text"] == "WAVE"
+                      and p_before_debounce["spec_params"].get("range_db") == p0["spec_params"].get("range_db")
+                      and p_range["spec_params"].get("range_db") == 60 and p_range["spec_opacity"] == "0.45"
+                      and p_scale["spec_params"].get("fscale") == "linear" and p_cmap["spec_params"].get("colormap") == "viridis"
+                      and p_closed["pop"]["display"] == "none",
+            },
+            "copy_pill": {
+                "clipboard": clip, "label_after_click": cp_mid["copy_text"], "label_1.5s_later": cp_after["copy_text"],
+                "state": {"fft_text": cp_mid["fft_text"], "solo": cp_mid["solo"], "step_index": cp_mid["step_index"]},
+                "ok": cp_mid["copy_text"] == "copied" and cp_after["copy_text"] == "copy" and clip.startswith("wavlens.show(<audio>, <annotation>, ")
+                      and 'view="fft"' in clip and 'solo=["ref"]' in clip and "step_index=1" in clip and "zoom=" in clip and "time=" in clip,
+            },
+            "step_slider": {
+                "initial": {"value": st0["step"]["value"], "max": st0["step"]["max"], "label": st0["step"]["label"], "step_labels": st0["step_labels"],
+                            "group_names": st0["group_names"], "hyp_segments": st0["hyp_segments"], "solo": st0["solo"]},
+                "after_slide_to_1": {"value": st1["step"]["value"], "label": st1["step"]["label"], "step_index": st1["step_index"],
+                                     "hyp_segments": st1["hyp_segments"], "group_names": st1["group_names"], "solo": st1["solo"],
+                                     "lane_segments": st1_state["lane_segments"]},
+                "solo_on_hyp_speaker90": st_solo["solo"],
+                "after_python_step_index_0": {"value": st2["step"]["value"], "label": st2["step"]["label"], "hyp_segments": st2["hyp_segments"],
+                                              "solo": st2["solo"], "outlined": sorted(l["key"] for l in st2_state["name_labels"] if l["outline"])},
+                "ok": st0["step"]["value"] == 0 and st0["step"]["max"] == 1 and st0["step"]["label"] == "hyp @ e1"
+                      and st1["step_index"] == 1 and st1["step"]["label"] == "hyp @ e2" and st1["hyp_segments"] == st0["hyp_segments"] - 1
+                      and st1["solo"] == ["g:0"] and st2["step"]["value"] == 0 and st2["hyp_segments"] == st0["hyp_segments"]
+                      and sorted(st2["solo"]) == sorted(["g:0", f"l:{hyp_idx}:speaker90"])
+                      and f"l:{hyp_idx}:speaker90" in [l["key"] for l in st2_state["name_labels"] if l["outline"]],
+            },
+            "live_false": {"gear": p_live["gear"], "ok": bool(p_live["gear"]) and p_live["gear"]["disabled"] is True and "kernel" in (p_live["gear"]["title"] or "")},
             "drag_remap_and_noop": {
                 "before": {"group_names": g3["group_names"], "solo": g3["solo"], "outlined": sorted(n["key"] for n in g3["name_labels"] if n["outline"])},
                 "after_group0_to_bottom": {"group_names": g4["group_names"], "solo": g4["solo"],
@@ -1079,7 +1180,7 @@ def main() -> None:
                             ("01_initial.png", "02_seek.png", "03_zoom.png", "04_spectrogram.png",
                              "05_functions.png", "06_fft_zoom.png", "07_ticks.png", "08_expander.png",
                              "09_rows.png", "10_fixed_labels.png", "11_fn_rows.png", "15_solo.png", "17_two_views.png",
-                             "18_drag.png", "19_audio_drag.png")],
+                             "18_drag.png", "19_audio_drag.png", "20_steps_panel.png")],
         }
     finally:
         srv.shutdown()
