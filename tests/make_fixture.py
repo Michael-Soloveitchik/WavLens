@@ -52,6 +52,21 @@ def main() -> None:
     # Three-group variant for drag-to-reorder: a (two speakers), b (blank-label timeline), c (two speakers again).
     dump(wavlens.show(audio={"clean": (x, sr)}, annotation={"a": ann, "b": ann.get_timeline(), "c": ann}),
          HERE / "fixture_3groups.json")
+    # Steps variant: hypothesis steps e1/e2 (shifted copies of the reference, e2 drops one segment) + boundaries lane.
+    from pyannote.core import Annotation, Segment  # noqa: E402
+
+    def shifted(src, dt, drop_first=False):
+        out = Annotation()
+        for k, (seg, _, lab) in enumerate(src.itertracks(yield_label=True)):
+            if drop_first and k == 0:
+                continue
+            out[Segment(max(0.0, seg.start + dt), seg.end + dt)] = lab
+        return out
+
+    e1, e2 = shifted(ann, 0.3), shifted(ann, 0.1, drop_first=True)
+    dump(wavlens.show(audio={"clean": (x, sr)}, annotation={"ref": ann, "edges": wavlens.boundaries(ann, e1)},
+                      steps={"e1": e1, "e2": e2}),
+         HERE / "fixture_steps.json")
 
 
 if __name__ == "__main__":

@@ -300,6 +300,36 @@ async (total) => {
 }
 """ % JS_READOUT
 
+# In-page: panel row 2 state (settings popover, copy pill, step slider) + spectrogram layer opacity.
+JS_PANEL = """
+() => {
+  const deep = %s;
+  const btns = [...document.querySelectorAll('#widget button')];
+  const gear = btns.find((b) => b.title === 'spectrogram settings' || /spectrogram settings/.test(b.title));
+  const copy = btns.find((b) => /^(copy|copied)$/.test(b.textContent));
+  const fft = btns.find((b) => /^(FFT|WAVE)$/.test(b.textContent));
+  const pop = document.querySelector('#widget .wl-pop');
+  const stepR = document.querySelector('#widget input.wl-step');
+  const w = deep('.wrapper')[0];
+  const own = w ? [...w.children].filter((c) => !c.getAttribute('part') && c.tagName === 'DIV') : [];
+  const m = window.wavlensModel;
+  return {
+    gear: gear ? { disabled: gear.disabled, title: gear.title, display: gear.style.display, opacity: gear.style.opacity } : null,
+    copy_text: copy ? copy.textContent : null, fft_text: fft ? fft.textContent : null,
+    pop: pop ? { display: pop.style.display, visible: pop.getClientRects().length > 0,
+                 ranges: pop.querySelectorAll('input.wl-range').length, seg_buttons: [...pop.querySelectorAll('.seg button')].map((b) => [b.textContent, b.classList.contains('on')]),
+                 select: pop.querySelector('select') ? pop.querySelector('select').value : null,
+                 options: pop.querySelector('select') ? [...pop.querySelector('select').options].map((o) => o.value) : [],
+                 values: [...pop.querySelectorAll('.v')].map((v) => v.textContent) } : null,
+    step: stepR ? { value: +stepR.value, max: +stepR.max, label: stepR.nextSibling ? stepR.nextSibling.textContent : null } : null,
+    spec_opacity: own[0] ? own[0].style.opacity : null,
+    spec_params: m.get('spec_params'), step_index: m.get('step_index'), step_labels: m.get('step_labels'),
+    group_names: (m.get('groups') || []).map((g) => g.name), hyp_segments: ((m.get('groups') || []).find((g) => g.name === 'hyp') || { segments: [] }).segments.length,
+    solo: m.get('solo'), live: m.get('live'), log_len: (window.wavlensLog || []).length,
+  };
+}
+""" % JS_DEEP_QUERY
+
 # In-page latency: ms from the action to the first readout text change (-1 if none within 2 s).
 JS_LATENCY = """
 (action) => new Promise((res) => {
