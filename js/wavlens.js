@@ -73,7 +73,7 @@ function render({ model, el: host }) {
   const R = () => N + (nOn() >= 2 ? 1 : 0);  // audio rows drawn: the inputs plus, while >= 2 are selected, the mix row
   const subs = [], on = (ev, cb) => { model.on(ev, cb); subs.push([ev, cb]); };  // removed on destroy
   const viewId = Symbol("view");  // several views of one model: only the one that started playback makes sound
-  const step = model.get("step") || 0.01;
+  const step = model.get("step_index") || 0.01;
   const expanded = new Set(model.get("expanded") || []);  // annotation names with an open legend column
   let enabled = (model.get("enabled") || []).slice(0, N);
   while (enabled.length < N) enabled.push(true);
@@ -96,7 +96,85 @@ function render({ model, el: host }) {
   const left2 = el("div", "position:absolute;left:4px;top:4px;");
   left2.appendChild(allBtn);
   bar1.append(timeOut, back, play, fwd);
-  bar2.append(left2, fft);
+  const copy = pill("copy", "min-width:44px;font-size:9px;font-weight:700;letter-spacing:1.2px;padding:1px 8px;border-color:#888;color:#222;margin-left:6px;");
+  copy.title = "copy a wavlens.show(...) call that reproduces this view";
+  const rangeCss = el("style");
+  rangeCss.textContent = ".wl-range{-webkit-appearance:none;appearance:none;width:120px;height:14px;background:transparent;margin:0 6px;vertical-align:middle;cursor:pointer}" +
+    ".wl-range::-webkit-slider-runnable-track{height:2px;border-radius:1px;background:rgba(0,0,0,.15)}" +
+    ".wl-range::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;border-radius:50%;background:rgba(30,136,229,.8);margin-top:-4px;border:0;box-shadow:0 0 0 3px rgba(30,136,229,.12)}" +
+    ".wl-range::-moz-range-track{height:2px;border-radius:1px;background:rgba(0,0,0,.15)}" +
+    ".wl-range::-moz-range-thumb{width:10px;height:10px;border-radius:50%;background:rgba(30,136,229,.8);border:0}" +
+    ".wl-pop{position:absolute;top:100%;margin-top:4px;background:rgba(255,255,255,.96);border:1px solid #e3e3e3;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.08);padding:8px 10px;z-index:30;font:10px sans-serif;color:#444;display:grid;grid-template-columns:auto 1fr auto;gap:6px 8px;align-items:center;white-space:nowrap}" +
+    ".wl-pop .v{min-width:44px;text-align:right;color:#777}.wl-pop .seg{display:inline-flex;gap:2px}.wl-pop .seg button{font:9px sans-serif;letter-spacing:.6px;padding:1px 7px;border:1px solid #ccc;border-radius:7px;background:#fff;color:#555;cursor:pointer}.wl-pop .seg button.on{background:#333;color:#fff;border-color:#333}" +
+    ".wl-pop select{font:10px sans-serif;border:1px solid #ccc;border-radius:6px;background:#fff;color:#444;padding:0 4px}";
+  // FFT settings: a sliders icon right of FFT opens a slim popover; edits go to spec_params and Python recomputes
+  const gear = pill("", "padding:0 5px;border-color:#888;color:#222;margin-left:4px;display:inline-flex;align-items:center;");
+  gear.innerHTML = '<svg width="12" height="10" viewBox="0 0 12 10"><g stroke="currentColor" stroke-width="1.2" stroke-linecap="round"><path d="M1 2h10M1 5h10M1 8h10"/></g><g fill="currentColor"><circle cx="8" cy="2" r="1.6"/><circle cx="4" cy="5" r="1.6"/><circle cx="7" cy="8" r="1.6"/></g></svg>';
+  gear.title = "spectrogram settings";
+  const pop = el("div", "display:none;"); pop.className = "wl-pop";
+  bar2.append(rangeCss, left2, fft, gear, copy, pop);
+  const WINDOWS = [8, 11, 16, 23, 32, 45, 64, 91, 128];
+  const sp = () => model.get("spec_params") || {};
+  const specCtl = {};
+  if (Object.keys(sp()).length) {
+    const row = (label, ctl, val) => { pop.append(el("span", "", label), ctl, Object.assign(el("span", "", ""), { className: "v", textContent: val })); return ctl.nextSibling; };
+    const slider = (min, max, step) => { const r = el("input", ""); r.type = "range"; r.min = min; r.max = max; r.step = step; r.className = "wl-range"; return r; };
+    specCtl.win = slider(0, WINDOWS.length - 1, 1); specCtl.winV = row("window", specCtl.win, "");
+    specCtl.fmax = slider(250, Math.round(sp().nyquist), 250); specCtl.fmaxV = row("fmax", specCtl.fmax, "");
+    specCtl.range = slider(40, 100, 10); specCtl.rangeV = row("range", specCtl.range, "");
+    const seg = el("span", ""); seg.className = "seg";
+    for (const name of ["mel", "linear"]) { const b = el("button", "", name); b.onclick = () => { for (const c of seg.children) c.classList.toggle("on", c === b); push(); }; seg.appendChild(b); }
+    specCtl.scale = seg; row("scale", seg, "");
+    const sel = el("select", ""); for (const c of ["magma", "inferno", "viridis", "cividis", "gray_r"]) sel.appendChild(Object.assign(el("option", "", c), { value: c }));
+    specCtl.cmap = sel; row("colormap", sel, "");
+    let pushTimer = 0;
+    const fill = () => {
+      const p = sp(); const wi = WINDOWS.reduce((b, w, i) => (Math.abs(w - p.window_ms) < Math.abs(WINDOWS[b] - p.window_ms) ? i : b), 0);
+      specCtl.win.value = wi; specCtl.winV.textContent = `${Math.round(p.window_ms)} ms`;
+      specCtl.fmax.value = Math.round(p.fmax ?? p.nyquist); specCtl.fmaxV.textContent = p.fmax == null || p.fmax >= p.nyquist ? "all" : `${Math.round(p.fmax)} Hz`;
+      specCtl.range.value = p.range_db; specCtl.rangeV.textContent = `${Math.round(p.range_db)} dB`;
+      for (const c of seg.children) c.classList.toggle("on", c.textContent === p.fscale);
+      if (![...sel.options].some((o) => o.value === p.colormap)) sel.appendChild(Object.assign(el("option", "", p.colormap), { value: p.colormap }));
+      sel.value = p.colormap;
+    };
+    const push = () => {
+      const p = sp(), fm = +specCtl.fmax.value;
+      const next = { ...p, window_ms: WINDOWS[+specCtl.win.value], fmax: fm >= p.nyquist ? null : fm, range_db: +specCtl.range.value,
+        fscale: [...seg.children].find((c) => c.classList.contains("on")).textContent, colormap: sel.value };
+      specCtl.winV.textContent = `${next.window_ms} ms`; specCtl.fmaxV.textContent = next.fmax == null ? "all" : `${next.fmax} Hz`; specCtl.rangeV.textContent = `${next.range_db} dB`;
+      clearTimeout(pushTimer);
+      pushTimer = setTimeout(() => { spec.style.opacity = ".45"; model.set("spec_params", next); model.save_changes(); }, 150);  // dim until the new images arrive
+    };
+    specCtl.win.oninput = specCtl.fmax.oninput = specCtl.range.oninput = push; sel.onchange = push;
+    fill();
+    on("change:spec_params", fill);
+    gear.onclick = (e) => { e.stopPropagation(); pop.style.display = pop.style.display === "none" ? "" : "none"; pop.style.left = `${gear.offsetLeft + gear.offsetWidth / 2 - pop.offsetWidth / 2}px`; if (!showSpec && pop.style.display === "") { showSpec = true; applyView(); } };
+    pop.onpointerdown = (e) => e.stopPropagation();
+    if (!model.get("live")) { gear.disabled = true; gear.style.opacity = ".4"; gear.title = "spectrogram settings need the kernel"; }
+  } else { gear.style.display = "none"; }
+  const closePop = () => { pop.style.display = "none"; };
+  document.addEventListener("pointerdown", closePop);
+  // Hypothesis steps: a slim slider swaps the step lane group (same name, one group per step).
+  const stepGroups = model.get("step_groups") || [], stepLabels = model.get("step_labels") || [];
+  const stepName = stepGroups.length ? stepGroups[0].name : null;
+  let range = null;
+  if (stepGroups.length) {
+    range = el("input", ""); range.type = "range"; range.min = 0; range.max = stepGroups.length - 1; range.step = 1; range.className = "wl-range wl-step";
+    range.title = "hypothesis step";
+    const lab = el("span", "font:10px sans-serif;color:#777;vertical-align:middle;white-space:nowrap;");
+    const box = el("span", "position:absolute;right:4px;top:3px;white-space:nowrap;");
+    box.append(range, lab);
+    bar2.appendChild(box);
+    range.setStep = (i) => {
+      range.value = i;
+      lab.textContent = `${stepName} @ ${stepLabels[i] ?? i}`;
+      model.set("groups", (model.get("groups") || []).map((g) => (g.name === stepName ? stepGroups[i] : g)));
+      model.set("step_index", i); model.save_changes();
+      syncGroups();
+    };
+    range.oninput = () => range.setStep(+range.value);
+    on("change:step_index", () => { const i = model.get("step_index") || 0; if (+range.value !== i) range.setStep(i); });
+  }
   const wave = el("div", "position:relative;width:100%;display:flex;align-items:flex-start;");
   const col0 = el("div", "position:relative;flex:none;"), col1 = el("div", "position:relative;flex:none;");
   const wsHost = el("div", "position:relative;flex:1;min-width:0;");
@@ -157,7 +235,7 @@ function render({ model, el: host }) {
   on("change:weighted", applyEnabled);
   on("change:enabled", () => { enabled = (model.get("enabled") || []).slice(0, N); while (enabled.length < N) enabled.push(true); draw(); renderMix(); });
   on("change:order", () => { const o = (model.get("order") || []).slice(); if (o.length === N && new Set(o).size === N && o.every((i) => i >= 0 && i < N)) { order = o; draw(); renderMix(); } });
-  on("change:spectrograms", () => draw());
+  on("change:spectrograms", () => { spec.style.opacity = ""; draw(); });
   on("change:mix_specs", () => draw());
   on("change:mix_mask", () => draw());
 
@@ -474,7 +552,7 @@ function render({ model, el: host }) {
   });
   draw();
   ws.on("ready", draw);
-  ["groups", "functions", "audio_names"].forEach((k) => on(`change:${k}`, () => {
+  const syncGroups = () => {
     const groups = model.get("groups") || [];
     for (const key of [...solos.keys()]) {  // drop solos whose annotation / speaker no longer exists
       const [kind, gi, lab] = key.split(":"), g = groups[+gi];
@@ -483,7 +561,26 @@ function render({ model, el: host }) {
     for (const key of [...dimmed]) { const [kind, gi, lab] = key.split(":"), g = groups[+gi]; if (!g || (kind === "l" && !g.rows.includes(lab))) dimmed.delete(key); }
     draw();
     applySolo();
-  }));
+  };
+  ["groups", "functions", "audio_names"].forEach((k) => on(`change:${k}`, syncGroups));
+  if (range) { range.value = model.get("step_index") || 0; range.previousSibling; range.nextSibling.textContent = `${stepName} @ ${stepLabels[+range.value] ?? range.value}`; }
+  // copy: the show(...) call for this view (inputs as placeholders), same format as WavLens.code() in Python
+  const codeOf = () => {
+    const gs = model.get("groups") || [], q = (s) => JSON.stringify(s);
+    const nameOf = (k) => { const inv = k.startsWith("!"), [kind, gi, lab] = k.replace(/^!/, "").split(":"); const g = gs[+gi]; return (inv ? "!" : "") + (g ? g.name : gi) + (kind === "l" ? `/${lab}` : ""); };
+    const parts = [`view=${q(showSpec ? "fft" : "wave")}`, `zoom=${+(ws.options.minPxPerSec || 0).toFixed(1)}`, `time=${ws.getCurrentTime().toFixed(3)}`];
+    if (!enabled.every(Boolean)) parts.push(`enabled=[${enabled.map((b) => (b ? "True" : "False")).join(", ")}]`);
+    if (solos.size) parts.push(`solo=[${soloState().map(nameOf).map(q).join(", ")}]`);
+    if (expanded.size !== gs.length) parts.push(`expanded=[${[...expanded].map(q).join(", ")}]`);
+    if (order.some((v, i) => v !== i)) parts.push(`order=[${order.join(", ")}]`);
+    if (stepGroups.length) parts.push(`step_index=${model.get("step_index") || 0}`);
+    return `wavlens.show(<audio>, <annotation>, ${parts.join(", ")})`;
+  };
+  copy.onclick = () => {
+    const s = codeOf();
+    (navigator.clipboard ? navigator.clipboard.writeText(s) : Promise.reject()).catch(() => window.prompt("copy:", s));
+    copy.textContent = "copied"; setTimeout(() => (copy.textContent = "copy"), 1200);
+  };
   // Rendered while hidden (collapsed output): the gutter measures 0; re-fit when it becomes visible.
   let seenWidth = root.clientWidth;
   const ro = new ResizeObserver(() => { if (seenWidth === 0 && root.clientWidth > 0) draw(); else fitSpecsSoon(); seenWidth = root.clientWidth; });
@@ -583,6 +680,7 @@ function render({ model, el: host }) {
 
   return () => {  // destroy: stop sound, release the AudioContext, drop every listener and timer
     clearTimeout(fitTimer);
+    document.removeEventListener("pointerdown", closePop);
     clearTimeout(hold); clearTimeout(flush);
     ro.disconnect();
     try { ws.pause(); } catch (e) { /* already gone */ }

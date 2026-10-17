@@ -28,6 +28,7 @@ __all__ = ["show", "WavLens", "PALETTE"]
 PALETTE = ["#e41a1c", "#377eb8", "#4daf4a", "#984ea3", "#ff7f00", "#ffff33", "#a65628", "#f781bf", "#999999"]  # Set1, as pyannote
 LINE_PALETTE = ["#000000", "#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#8c564b"]
 ANN_EXT = {".rttm", ".uem", ".lab", ".txt", ".json", ".seglst", ".jsonl"}
+FIXED_COLORS = {"matched": "rgba(67,160,71,.55)", "unmatched": "rgba(229,57,53,.65)"}  # derived lanes (boundaries)
 METHODS = ("linear", "nearest", "previous", "cubic")
 N_POINTS = 2000          # peaks per audio and points per function sent to the browser
 STATE_WARN_MB = 20       # widget state above this lands in the notebook file; warn
@@ -300,6 +301,25 @@ def _from_rttm(lines):
     return out
 
 
+def _as_annotation(obj):
+    """Any annotation form (object, text, path) -> pyannote Annotation; no clipping."""
+    return _read_annotations(obj)[0][1] if _is_ann_path(obj) else _annotation(obj, float("inf"), 0.5)
+
+
+def boundaries(reference, hypothesis, tolerance=0.25):
+    """Segment-boundary agreement, pyannote.metrics SegmentationPrecision/Recall semantics, as an
+    Annotation with two labels: every hypothesis boundary (start or end) gets a window of +-tolerance,
+    labelled "matched" when a reference boundary falls inside it, else "unmatched". Draw it as a lane:
+    wavlens.show(audio, annotation={"ref": ref, "hyp": hyp, "edges": wavlens.boundaries(ref, hyp)})."""
+    edges = lambda a: np.array(sorted({t for seg in _as_annotation(a).itersegments() for t in (seg.start, seg.end)}))
+    ref, hyp = edges(reference), edges(hypothesis)
+    out = Annotation()
+    for b in hyp:
+        hit = ref.size and np.abs(ref - b).min() <= tolerance
+        out[Segment(max(0.0, b - tolerance), b + tolerance)] = "matched" if hit else "unmatched"
+    return out
+
+
 def _read_annotations(path):
     """Annotation file -> [(name, Annotation)]: .rttm / .uem (one group per uri), .lab / .txt,
     .json / .seglst (records, or {"diarization": [...]}), .jsonl NeMo manifest (follows rttm_filepath)."""
@@ -425,7 +445,7 @@ def _groups(named, colors, form, duration, threshold):
     names = _unique([n for n, _ in anns], "sp")
     specs = _color_specs(colors, form, len(anns))
     labels_all = sorted({str(l) for _, a in anns for l in a.labels()})
-    base = {lab: PALETTE[i % len(PALETTE)] for i, lab in enumerate(labels_all)}
+    base = {lab: FIXED_COLORS.get(lab, PALETTE[i % len(PALETTE)]) for i, lab in enumerate(labels_all)}
     groups = []
     for i, (name, (_, ann)) in enumerate(zip(names, anns)):
         labels = [str(l) for l in ann.labels()]
@@ -660,11 +680,36 @@ def specs_possible():
         return False
 
 
-def _mix_spec(on, sr, cmap, height, fscale, fmax):
-    """Spectrogram of the mean of the selected audios (what is played), cached by content."""
-    mix = sum(on) / len(on)
-    _, ck = _cmap(cmap)
-    return _cache.get_or(_digest(_digest(mix, sr), ck, height, fscale, fmax), lambda: _spectrogram(mix, sr, cmap, height, fscale, fmax))
+def _spec_params(sr, colormap="magma", fscale="mel", fmax=None, window_ms=None, range_db=80):
+    """The live spectrogram settings as one validated dict (what the browser's FFT popover edits)."""
+    nyq = sr / 2
+    if window_ms is None:
+        window_ms = 1000 * 2 ** round(math.log2(0.032 * sr)) / sr  # power-of-two window near 32 ms
+    p = {"window_ms": float(window_ms), "fmax": None if fmax is None else float(fmax), "fscale": fscale,
+         "colormap": colormap if isinstance(colormap, str) else getattr(colormap, "name", "magma"), "range_db": float(range_db), "nyquist": nyq}
+    if not 4 <= p["window_ms"] <= 512:
+        raise ValueError(f"window_ms must be in [4, 512], got {window_ms}")
+    if not 20 <= p["range_db"] <= 120:
+        raise ValueError(f"range_db must be in [20, 120] dB, got {range_db}")
+    if p["fmax"] is not None and not 0 < p["fmax"] <= nyq:
+        raise ValueError(f"fmax must be in (0, {nyq:.0f}] Hz, got {fmax}")
+    if p["fscale"] not in ("mel", "linear"):
+        raise ValueError(f"fscale must be 'mel' or 'linear', got {fscale!r}")
+    _cmap(p["colormap"])
+    return p
+
+
+def _spec(x, sr, height, p):
+    """Cached spectrogram of x under the settings dict p."""
+    n_fft = int(min(4096, max(256, 2 ** round(math.log2(p["window_ms"] / 1000 * sr)))))
+    _, ck = _cmap(p["colormap"])
+    key = _digest(_digest(x, sr), ck, height, p["fscale"], p["fmax"], n_fft, p["range_db"])
+    return _cache.get_or(key, lambda: _spectrogram(x, sr, p["colormap"], height, p["fscale"], p["fmax"], n_fft, dyn_range=p["range_db"]))
+
+
+def _mix_spec(on, sr, height, p):
+    """Spectrogram of the mean of the selected audios (what is played)."""
+    return _spec(sum(on) / len(on), sr, height, p)
 
 
 # ----------------------------------------------------------------------------- widget
@@ -679,6 +724,11 @@ class WavLens(anywidget.AnyWidget):
     functions = traitlets.List([]).tag(sync=True)       # [{"name", "color", "row", "x", "y"}, ...]; row = audio index or -1
     peaks = traitlets.List([]).tag(sync=True)           # per audio (+ the mix row when >= 2 audios): abs-max bins
     spectrograms = traitlets.List([]).tag(sync=True)    # per audio (+ mix): JPEG data URL, stretched to the row
+    step_groups = traitlets.List([]).tag(sync=True)     # steps=: one lane group per hypothesis step (same name)
+    step_labels = traitlets.List([]).tag(sync=True)     # the slider labels (epochs, checkpoints, ...)
+    step_index = traitlets.Int(0).tag(sync=True, echo_update=False)  # current hypothesis step, both ways
+    live = traitlets.Bool(True).tag(sync=True)           # False in standalone HTML: no kernel to recompute spectrograms
+    spec_params = traitlets.Dict({}).tag(sync=True, echo_update=False)  # {window_ms, fmax, fscale, colormap, range_db, nyquist}: live FFT settings
     mix_mask = traitlets.List([]).tag(sync=True)        # the enabled set the last spectrogram (the mix) was computed for
     mix_specs = traitlets.Dict({}).tag(sync=True)       # {"1101": url}: mix spectrograms per enabled set (all subsets for <= 3 audios, then every set seen)
     audio_names = traitlets.List([]).tag(sync=True)
@@ -750,7 +800,7 @@ class WavLens(anywidget.AnyWidget):
         self.expanded = [n for n in self.expanded if n in new]
 
     def close(self):
-        self._mix = None  # release the kept audio copies
+        self._audio = None  # release the kept audio copies
         super().close()
 
     @traitlets.validate("order")
@@ -769,24 +819,46 @@ class WavLens(anywidget.AnyWidget):
             raise traitlets.TraitError(f"enabled needs {self.channels} entries, got {len(v)}")
         return [bool(e) for e in v]  # numpy bools are not JSON-serializable
 
-    _mix = None  # (xs, sr, colormap, height, fscale, fmax) when there are >= 2 audios
+    _audio = None  # (xs, sr, height): the normalized audios, kept for live spectrogram settings and the mix row
+
+    @traitlets.validate("spec_params")
+    def _spec_params_valid(self, p):
+        v = p["value"]
+        if not v or not self._audio:
+            return v
+        sr = self._audio[1]
+        return _spec_params(sr, v.get("colormap", "magma"), v.get("fscale", "mel"), v.get("fmax"), v.get("window_ms"), v.get("range_db", 80))
 
     @traitlets.observe("enabled")
     def _mix_changed(self, _):
         """Keep the mix row's spectrogram in step with the enabled set (the browser redraws its waveform itself)."""
-        if not self._mix:
+        if not self._audio or len(self._audio[0]) < 2 or not self.spec_params:
             return
-        xs, sr, cmap, height, fscale, fmax = self._mix
+        xs, sr, height = self._audio
         on = [x for x, e in zip(xs, self.enabled) if e]
         if len(on) < 2:
             return  # no mix row shown
         key = "".join("1" if e else "0" for e in self.enabled)
-        spec = self.mix_specs.get(key) or _mix_spec(on, sr, cmap, height, fscale, fmax)
+        spec = self.mix_specs.get(key) or _mix_spec(on, sr, height, self.spec_params)
         if key not in self.mix_specs:
             self.mix_specs = {**self.mix_specs, key: spec}  # exports made later carry every subset seen
         if not self.spectrograms or self.spectrograms[-1] != spec or self.mix_mask != list(self.enabled):
             self.spectrograms = self.spectrograms[:len(xs)] + [spec]
             self.mix_mask = list(self.enabled)
+
+    @traitlets.observe("spec_params")
+    def _spec_changed(self, _):
+        """Live FFT settings (browser popover or `w.spec_params = {...}`): recompute every spectrogram."""
+        if not self._audio or not self.spec_params or not self.spectrograms:
+            return
+        xs, sr, height = self._audio
+        p = self.spec_params
+        specs = [_spec(x, sr, height, p) for x in xs]
+        if len(xs) >= 2:
+            self.mix_specs = {k: _mix_spec([x for x, b in zip(xs, k) if b == "1"], sr, height, p) for k in self.mix_specs}
+            if sum(self.mix_mask) >= 2:
+                specs.append(self.mix_specs["".join("1" if b else "0" for b in self.mix_mask)])
+        self.spectrograms = specs
 
     def seek(self, t):
         self.current_time = float(t)
@@ -820,6 +892,28 @@ class WavLens(anywidget.AnyWidget):
             keys.append(("!" if inv else "") + self._key(i[1:] if inv else i))
         self.solo = keys
 
+    def code(self):
+        """A `wavlens.show(...)` call that reproduces the current view (inputs as placeholders); the
+        browser's `copy` pill gives the same string, with the live zoom."""
+        names = [g["name"] for g in self.groups]
+
+        def name_of(key):
+            inv, k = key.startswith("!"), key.lstrip("!")
+            kind, gi, *lab = k.split(":")
+            return ("!" if inv else "") + names[int(gi)] + (f"/{lab[0]}" if kind == "l" else "")
+        parts = [f'view="{self.view}"', f"zoom={self.zoom:g}", f"time={self.current_time:.3f}"]
+        if not all(self.enabled):
+            parts.append(f"enabled={[bool(e) for e in self.enabled]}")
+        if self.solo:
+            parts.append(f"solo={[name_of(k) for k in self.solo]}")
+        if set(self.expanded) != set(names):
+            parts.append(f"expanded={list(self.expanded)}")
+        if list(self.order) != list(range(len(self.order))):
+            parts.append(f"order={list(self.order)}")
+        if self.step_groups:
+            parts.append(f"step_index={self.step_index}")
+        return f"wavlens.show(<audio>, <annotation>, {', '.join(parts)})"
+
     def dim(self, *items):
         """Dim these annotations / speakers; no arguments clears."""
         self.dimmed = [self._key(i) for i in items]
@@ -829,7 +923,7 @@ class WavLens(anywidget.AnyWidget):
         """Self-contained HTML string: audio, spectrograms, lanes, functions and every control work; only
         the Python sync is absent. Use for experiment trackers, reports, e-mail."""
         js = (Path(__file__).parent / "wavlens.iife.js").read_text()
-        state = json.dumps({n: getattr(self, n) for n in WavLens.class_own_traits(sync=True)})  # declared class: anywidget subclasses per instance
+        state = json.dumps({**{n: getattr(self, n) for n in WavLens.class_own_traits(sync=True)}, "live": False})  # no kernel in the page
         return f"""<!doctype html><html><head><meta charset="utf-8"><title>{title}</title>
 <style>body{{margin:0;padding:8px;background:#fff;font-family:sans-serif}}</style></head><body><div id="wavlens"></div>
 <script>{js}</script>
@@ -860,7 +954,7 @@ wavlens_mod.default.render({{model,el:document.getElementById("wavlens")}});}})(
 def show(*items, audio=None, annotation=None, function=None, sample_rate=None, height=96, row_height=16,
          weights=None, interpolation="linear", colors=None, colormap="magma", view="wave", expanded=True,
          step=0.01, enabled=None, solo=None, dim=(), zoom=0.0, time=0.0, autoplay=False, threshold=0.5,
-         fscale="mel", fmax=None, order=None):
+         fscale="mel", fmax=None, order=None, steps=None, step_name="hyp", step_index=0, window_ms=None, range_db=80):
     """wavlens.show(audio, annotation, ...) positional in any order, or by keyword.
 
     audio:      path | pyannote AudioFile dict {"audio": path} or {"waveform": array, "sample_rate": sr}
@@ -963,8 +1057,8 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
     keys = [_digest(x, sr) for x in rows]
     audio_url = _cache.get_or(_digest(*keys[:len(xs)], "wav"), wav)
     peaks = [_cache.get_or(k + "peaks", lambda x=x: _peaks(x)) for k, x in zip(keys, rows)]
-    _, ck = _cmap(colormap) if specs_possible() else (None, str(colormap))
-    specs = [_cache.get_or(_digest(k, ck, height, fscale, fmax), lambda x=x: _spectrogram(x, sr, colormap, height, fscale, fmax)) for k, x in zip(keys[:len(xs)], xs)]
+    sp = _spec_params(sr, colormap, fscale, fmax, window_ms, range_db) if specs_possible() else {}
+    specs = [_spec(x, sr, height, sp) if sp else "" for x in xs]
     en = [bool(e) for e in enabled] if enabled is not None else [True] * len(loaded)
     mix_specs, mix_mask = {}, []
     if len(xs) >= 2 and specs[0]:
@@ -975,7 +1069,7 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
             masks.append([True] * len(xs))
         for m in masks:
             if sum(m) >= 2:
-                mix_specs["".join("1" if b else "0" for b in m)] = _mix_spec([x for x, b in zip(xs, m) if b], sr, colormap, height, fscale, fmax)
+                mix_specs["".join("1" if b else "0" for b in m)] = _mix_spec([x for x, b in zip(xs, m) if b], sr, height, sp)
         mix_mask = en if len(en) == len(xs) and sum(en) >= 2 else [True] * len(xs)
         specs = specs + [mix_specs["".join("1" if b else "0" for b in mix_mask)]]
     w = WavLens(
@@ -986,8 +1080,23 @@ def show(*items, audio=None, annotation=None, function=None, sample_rate=None, h
         height=height, row_height=row_height, view=view, step=step, zoom=float(zoom),
         current_time=float(time), autoplay=bool(autoplay),
     )
-    if len(loaded) >= 2:
-        w._mix = (xs, sr, colormap, height, fscale, fmax)
+    w._audio = (xs, sr, height)
+    w.spec_params = sp
+    if steps is not None:  # one hypothesis per step; a slider swaps the `step_name` lane group
+        pairs = list(steps.items()) if isinstance(steps, dict) else list(enumerate(steps))
+        if not pairs:
+            raise ValueError("steps must hold at least one annotation")
+        built = _groups([(f"{step_name}~{i}", a) for i, (_, a) in enumerate(pairs)], None, None, duration, threshold)
+        palette = {s["label"]: s["color"] for g in w.groups for s in g["segments"]}  # same speaker name = same colour as the fixed annotations
+        spare = iter(c for c in PALETTE if c not in palette.values())
+        for g in built:
+            g["name"] = str(step_name)
+            for seg in g["segments"]:
+                seg["color"] = palette.setdefault(seg["label"], next(spare, seg["color"]))
+        if not 0 <= int(step_index) < len(built):
+            raise ValueError(f"step_index must be in [0, {len(built)}), got {step_index}")
+        w.step_labels, w.step_groups, w.step_index = [str(k) for k, _ in pairs], built, int(step_index)
+        w.groups = w.groups + [built[int(step_index)]]
     w.enabled = [bool(e) for e in enabled] if enabled is not None else [True] * len(loaded)
     w.order = list(range(len(loaded))) if order is None else [int(i) for i in order]
     names_g = [g["name"] for g in w.groups]
