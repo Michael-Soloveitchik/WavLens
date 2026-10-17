@@ -130,6 +130,10 @@ Documented, not changed: `nearest` and `previous` coincide under the frame-centr
 | B39 | Play from inside a gap armed the mask one task late | mask scheduled synchronously from the jump target in the play handler | ✅ |
 | S12 | Pressing FFT at fit view showed the raw column-sampled image: the resample ran only on zoom/resize, and the draw-time pass measured 0 px while the layer was hidden | the resample is scheduled when the FFT layer is switched on | ✅ |
 | R17 | The chevron before an annotation now collapses it: closed = all speakers in one row, no labels, block shrinks; open = one row per speaker with labels. `expanded` defaults to all open; state kept in the trait | ✅ |
+| R18 | `wavlens.boundaries(ref, hyp, tolerance)`: matched / unmatched boundary windows as an annotation (fixed translucent colours) | ✅ |
+| R19 | `steps={label: hyp}` + slim slider swaps the `hyp` lane group; `step_index` trait both ways; colours shared with the fixed annotations | ✅ |
+| R20 | `copy` pill and `w.code()` emit the `show(...)` call for the current view | ✅ |
+| R21 | Live spectrogram settings popover (window, fmax, range, scale, colormap) → `spec_params` trait, Python recomputes; disabled in standalone HTML (`live=False`) | ✅ |
 | R7 | Renamed waviz → WavLens (`wavlens` package, `WavLens` class, `wavlens.js`, `wavlens.iife.js`), repo on branch `main`, README with screenshots from `docs/`, `.github/workflows/publish.yml` for PyPI releases | ✅ |
 
 ## Third pass (expander, drag, mix row, mel axis)

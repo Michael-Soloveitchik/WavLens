@@ -56,8 +56,9 @@ Minimal report. Three parallel surveys (viewers, rendering/playback theory, rese
 | Priority | Features | State today |
 |---|---|---|
 | P0 | DER error lanes with collar (#1), mapped speaker colours (#2), posterior shading with a live threshold slider (#3), A/B keys (#4), loop region (#5), next/previous segment keys (#6) | absent; `threshold=` is a static argument, keys are only space / ← / → |
-| P1 | speaker-count curve (#7), overlap lane (#8), word lane with tcpWER colours (#9), SI-SDR over time (#10), DNSMOS/STOI/PESQ curves (#11), difference row (#12), export mask as RTTM/UEM (#13), bookmarks (#14), UEM as scoring mask (#15), similarity-to-speaker curve (#16), per-speaker DER hover (#17), collar strips (#18), disagreement lane (#19), copy view as code (#20) | absent; a `.uem` file loads only as a plain lane (#15); `a − b` is reachable through `weights=[1, -1]` but not as a mix-row toggle (#12) |
-| P2 | boundary match ticks (#21), hypothesis step slider (#22), embedding matrix / UMAP panel (#23), streaming latency lane (#24) | absent |
+| P1 | speaker-count curve (#7), overlap lane (#8), word lane with tcpWER colours (#9), SI-SDR over time (#10), DNSMOS/STOI/PESQ curves (#11), difference row (#12), export mask as RTTM/UEM (#13), bookmarks (#14), UEM as scoring mask (#15), similarity-to-speaker curve (#16), per-speaker DER hover (#17), collar strips (#18), disagreement lane (#19) | absent; a `.uem` file loads only as a plain lane (#15); `a − b` is reachable through `weights=[1, -1]` but not as a mix-row toggle (#12) |
+| P2 | embedding matrix / UMAP panel (#23), streaming latency lane (#24) | absent |
+| done 2026-10-17 | copy view as code (#20: `copy` pill + `w.code()`), boundary match ticks (#21: `wavlens.boundaries()`), hypothesis step slider (#22: `steps=`), live spectrogram settings popover (window, fmax, range, scale, colormap) | implemented |
 
 Grounded in pyannote.metrics, meeteval, NeMo, torchmetrics and the review tools above. Cost S/M/L, priority P0–P2.
 

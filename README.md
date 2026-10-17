@@ -56,12 +56,16 @@ Three audios and the `mix` row, the mean of the selected ones at 1/m each. Mutin
 
 Wheel zoom at 40 px/s on the spectrogram: the image is stretched, the ruler is recomputed, the playhead and lanes stay aligned. `zoom=40, time=10.2, view="fft"` reproduce it from Python.
 
+![settings](docs/fft_settings.png)
+
+Live spectrogram settings (window, fmax, range, mel / linear, colormap) from the sliders icon; `copy` puts a `wavlens.show(...)` call for the current view on the clipboard; `steps={epoch: hyp}` adds the slider at the right that swaps the hypothesis lane; `wavlens.boundaries(ref, hyp)` draws matched / unmatched boundary windows as the `edges` lane.
+
 ## Inputs
 
 - Audio: path, `{"audio": path}`, `{"waveform": tensor, "sample_rate": sr}`, `(array_or_tensor, sr)` (what `torchaudio.load` returns), lists and `{name: ...}` dicts. Integers scaled, any torch device. `sample_rate=` is an optional target; mixed rates resample to the highest.
 - Annotations, as objects: pyannote `Annotation` / `Timeline` / `Segment` / `DiarizeOutput`, its `serialize()` dict, NeMo Sortformer `diarize()` lines, a NeMo manifest dict, `{start, end, speaker}` records (SegLST, WhisperX), `(start, end, label)` tuples, `{speaker: [(start, end), ...]}` dicts, RTTM text, HF `.logits` (WavLM), frame matrices `(T, K)`. As files: `.rttm`, `.uem`, `.lab` / `.txt`, `.json` / `.seglst`, NeMo `.jsonl`.
 - Functions: any 1-D signal, `(T, K)` matrices, HF logits, `SlidingWindowFeature`; bound to one audio by name or drawn on every row; any length, frame-centre time convention.
-- Python control: `w.seek`, `w.play`, `w.pause`, `w.enabled`, `w.solo_("ref", "!ref/speaker91")`, `w.dim(...)`, all also as `show()` arguments.
+- Python control: `w.seek`, `w.play`, `w.pause`, `w.enabled`, `w.solo_("ref", "!ref/speaker91")`, `w.dim(...)`, `w.spec_params`, `w.code()`, all also as `show()` arguments.
 - Export: `w.save_html("run.html")` (self-contained, interactive, no kernel), `w.log_comet(experiment, step=epoch)`, `w.log_wandb("diarization", step=epoch)`.
 
 Full reference: `FUNCTIONALITIES.md`. Fixed findings from the bug hunts: `FIXED_BUGS.md`. Blueprint: `plan.md`. Examples: `examples/wavlens.ipynb`, one cell per form. Hebrew documentation for Confluence, one page per notebook chapter with use cases: `confluence/`. Theory, comparison with other viewers and the feature roadmap: `theory.md`.

@@ -9,7 +9,8 @@ wavlens.show(*items, audio=None, annotation=None, function=None, sample_rate=Non
            height=96, row_height=16, weights=None, interpolation="linear", colors=None,
            colormap="magma", view="wave", expanded=True, step=0.01,
            enabled=None, solo=None, dim=(), zoom=0.0, time=0.0, autoplay=False, threshold=0.5,
-           fscale="mel", fmax=None, order=None) -> WavLens
+           fscale="mel", fmax=None, order=None, steps=None, step_name="hyp", step_index=0,
+           window_ms=None, range_db=80) -> WavLens
 ```
 
 - Positional `*items`: any mix of audios and annotations, any order. Dispatch by type: pyannote objects, annotation files, annotation objects (section 3) are annotations; everything else is audio. A positional 2-D array is audio `(C, T)`; frame matrices must go through `annotation=` / `function=`. Anything unrecognized raises `TypeError`.
@@ -64,6 +65,11 @@ Rules:
 - Segments are clipped to `[0, duration]`; empty ones dropped.
 - Overlapping segments with the same label share the row.
 
+### 3b. Derived annotations
+
+- `wavlens.boundaries(reference, hypothesis, tolerance=0.25)` → `Annotation` with labels `matched` / `unmatched`: one window of ±tolerance around every hypothesis boundary (start or end), matched when a reference boundary falls inside (pyannote.metrics SegmentationPrecision/Recall semantics). Fixed translucent colours (green / red). Use it as any annotation: `annotation={"ref": ref, "hyp": hyp, "edges": wavlens.boundaries(ref, hyp)}`.
+- `steps={label: annotation, ...}` (or a list): one hypothesis per training step / checkpoint. One lane group named `step_name` (default `hyp`) shows the step selected by a slim slider in panel row 2 (label `hyp @ <label>`); `step_index=` picks the initial one, trait `step_index` syncs both ways, `step_groups` / `step_labels` hold the rest. Speaker names shared with the fixed annotations keep their colours.
+
 ## 4. Functions (`function=`)
 
 Forms: 1-D array/tensor; frame matrix `(T,K)` / `(1,T,K)` or `.logits` (one curve per column, named `name[k]`); `pyannote.core.SlidingWindowFeature` (its own window middles as time axis, columns as curves); list; `{name: item}` dict.
@@ -89,11 +95,13 @@ Mirror the `audio` form: dict ↔ dict with the same keys, list ↔ list of the 
 
 `colormap=` any matplotlib name (validated). `fscale="mel"` (default) or `"linear"`; `fmax=` top of the axis in Hz (default Nyquist; 5000 is a good speech setting). numpy STFT: window ≈ 32 ms at any rate (`n_fft` = power of two nearest 0.032·sr: 512 @ 16 kHz, 2048 @ 48 kHz; `n_fft=` overrides), hop n_fft/4, Hann, magnitude normalized by window gain, frames max-pooled into at most 4000 columns by sample time (the image spans exactly the audio), computed in 1 M-sample chunks (bounded memory, every sample observed). dB range 80 below `max(peak, −60 dBFS)` so silence is dark. Frequency axis: mel-spaced rows (low band gets most of the height, each row = max over its bins) or linear (max-pooled when shrinking, bilinear when growing); high frequencies on top; column i centred at `(i + 0.5) / cols`. Encoded as JPEG q85 4:4:4 data URL, one per audio; the browser stretches it with the zoom and, when the view has fewer pixels than columns, box-resamples it through a canvas (no column skipping). `colormap=` any matplotlib name (case-insensitive) or Colormap object. Mix row: `mix_specs` holds the mix spectrogram per enabled set (all subsets precomputed for ≤ 3 audios, every set seen afterwards), `mix_mask` the set of the last one; with a kernel Python computes missing sets on toggle, without one (standalone export) the mix row shows a note for an unseen set. Needs matplotlib (+Pillow); without it the fft button shows nothing.
 
+Live settings: the sliders icon right of `FFT` opens a popover (window 8–128 ms, fmax, range 40–100 dB, mel / linear, colormap). Edits write the `spec_params` trait `{window_ms, fmax, fscale, colormap, range_db, nyquist}`; Python validates and recomputes every spectrogram (inputs and the mix subsets, cached) and the browser swaps the images (dimmed meanwhile). `w.spec_params = {**w.spec_params, "window_ms": 64}` does the same from Python; `show(window_ms=, range_db=)` set the start values. In standalone HTML (`live=False`) the icon is disabled: no kernel to recompute.
+
 ## 9. Layout and controls (browser)
 
 Rows top to bottom:
 1. Panel row 1: time readout (seconds, 3 decimals) | `◀` (−step) | play/pause (green circle) | `▶` (+step). Tooltips show the step.
-2. Panel row 2: `none`/`all` (left, dark pill, toggles every audio; label = next action) | `FFT`/`WAVE` (small caps pill).
+2. Panel row 2: `none`/`all` (left, dark pill, toggles every audio; label = next action) | `FFT`/`WAVE` (small caps pill) | sliders icon (spectrogram settings popover, section 8) | `copy` (copies a `wavlens.show(<audio>, <annotation>, view=, zoom=, time=, enabled=, solo=, expanded=, order=, step_index=)` call reproducing the current view; label reads `copied` for a second) | right: the `steps` slider when `steps=` was given.
 3. Gutter column 0: per-audio checkbox + name at each audio row (green check = playing, empty box = muted; press-hold-drag the pill to reorder the audio rows, `order` trait = permutation of the original indices, waveforms / spectrograms / mute white-outs / bound functions follow); at each lane group a small chevron (`button.exp`, rotates when open) that expands (one row per speaker, labels in column 1) or collapses the annotation (all speakers in ONE row, no labels; the block shrinks) and the annotation name (click = mask cycle; press-hold-drag beyond 5 px = move the group up or down, a blue line shows the drop position, the new order is written to `groups`, mask keys follow). Width = widest entry or the all/none button (dark filled pill).
 4. Gutter column 1: one coloured speaker label per lane row, only for the expanded annotations (`expanded` trait / argument, default all); collapses when none is open (click = mask cycle). Width = widest label. Light colours get a dark halo.
 5. Audio rows, `height` px each: waveform (first paint from 2000 peaks, exact samples after background decode) or spectrogram image (`fft`). Function lines overlay (SVG, 1 px). While two or more audios are **selected** a last **mix row** (blue frame, label `mix`, no checkbox) shows the mean of the selected audios, i.e. what is played; it appears and disappears with the selection and re-renders on every toggle (waveform in the browser, spectrogram recomputed by Python when `enabled` changes).
@@ -112,9 +120,9 @@ Interactions:
 
 ## 10. Python ↔ browser
 
-Traits (synced): `audio_url, duration, functions, peaks, spectrograms, audio_names, channels, weighted, height, row_height, view, step, zoom, autoplay` (Python → browser) and `groups` (order changes by drag), `order` (audio row order), `expanded, current_time, playing, enabled, solo, dimmed` (both ways, `echo_update=False` so a slow link never replays stale values).
+Traits (synced): `audio_url, duration, functions, peaks, spectrograms, mix_specs, mix_mask, step_groups, step_labels, live, audio_names, channels, weighted, height, row_height, view, step, zoom, autoplay` (Python → browser) and `groups` (order changes by drag), `order` (audio row order), `expanded, current_time, playing, enabled, solo, dimmed, step_index, spec_params` (both ways, `echo_update=False` so a slow link never replays stale values).
 
-Methods: `w.seek(t)`, `w.play()`, `w.pause()`, `w.solo_(*items)` (`"ref"`, `"ref/speaker90"`, `("ref", "speaker90")`; no args clears), `w.dim(*items)` (same keys; no args clears), `w.enabled = [...]`, `w.expanded = ["ref"]`, `w.groups` (current order).
+Methods: `w.code()` (the `show(...)` call for the current view, same format as the `copy` pill; zoom is the initial one since the browser's zoom is not synced back), `w.seek(t)`, `w.play()`, `w.pause()`, `w.solo_(*items)` (`"ref"`, `"ref/speaker90"`, `("ref", "speaker90")`; no args clears), `w.dim(*items)` (same keys; no args clears), `w.enabled = [...]`, `w.expanded = ["ref"]`, `w.groups` (current order).
 
 Arguments for initial state: `enabled=[bools]`, `solo="ref"` or list, `dim=[...]`, `zoom=px_per_second` (0 = fit), `time=seconds`, `autoplay=True` (browsers may block until a click), `view="fft"`, `expanded=True | [names]`, `order=[...]`, `fscale`, `fmax`, `step=seconds`.
 
