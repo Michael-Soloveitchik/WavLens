@@ -64,7 +64,7 @@ Wheel zoom at 40 px/s on the spectrogram: the image is stretched, the ruler is r
 - Python control: `w.seek`, `w.play`, `w.pause`, `w.enabled`, `w.solo_("ref", "!ref/speaker91")`, `w.dim(...)`, all also as `show()` arguments.
 - Export: `w.save_html("run.html")` (self-contained, interactive, no kernel), `w.log_comet(experiment, step=epoch)`, `w.log_wandb("diarization", step=epoch)`.
 
-Full reference: `FUNCTIONALITIES.md`. Fixed findings from the bug hunts: `FIXED_BUGS.md`. Blueprint: `plan.md`. Examples: `examples/wavlens.ipynb`, one cell per form. Hebrew documentation for Confluence, one page per notebook chapter with use cases: `confluence/`.
+Full reference: `FUNCTIONALITIES.md`. Fixed findings from the bug hunts: `FIXED_BUGS.md`. Blueprint: `plan.md`. Examples: `examples/wavlens.ipynb`, one cell per form. Hebrew documentation for Confluence, one page per notebook chapter with use cases: `confluence/`. Theory, comparison with other viewers and the feature roadmap: `theory.md`.
 
 ## Develop
 
